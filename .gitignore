@@ -1,0 +1,42 @@
+# Dependencies and generated files
+node_modules/
+coverage/
+dist/
+artifacts/
+*.log
+*.zip
+
+# Local credentials and browser sessions
+.env
+.env.*
+!.env.example
+credentials*.json
+secrets*.json
+cookies*.json
+cookies*.txt
+*storage-state*.json
+*storageState*.json
+browser-profile/
+.auth/
+*.pem
+*.key
+
+# Downloaded course content and local diagnostics
+downloads/
+course-content/
+transcripts/
+diagnostics/
+*.mp4
+*.m4v
+*.webm
+*.mp3
+*.vtt
+*.srt
+下载清单.csv
+
+# Editor and OS files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+Desktop.ini

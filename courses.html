@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light">
+    <title>canvas-helper · 学期课程总览</title>
+    <link rel="stylesheet" href="dashboard.css">
+    <link rel="stylesheet" href="courses.css">
+    <script type="module" src="courses.js"></script>
+  </head>
+  <body>
+    <main class="workspace overview-workspace">
+      <header class="page-header">
+        <div>
+          <p class="eyebrow">canvas-helper · EDGE 扩展</p>
+          <h1>学期课程总览</h1>
+          <p class="page-intro">课程介绍与 Panopto 视频，一页看清。</p>
+        </div>
+        <span class="header-badge">自动整理课程</span>
+      </header>
+
+      <section class="card overview-controls" aria-label="学期与整理进度">
+        <div class="overview-toolbar">
+          <label class="term-field" for="termSelect">
+            <span>查看学期</span>
+            <select id="termSelect" disabled>
+              <option value="">正在读取课程…</option>
+            </select>
+          </label>
+          <div class="overview-actions">
+            <button id="refreshBtn" type="button" class="button secondary" disabled>重新读取</button>
+            <button id="stopBtn" type="button" class="button danger" disabled>停止</button>
+          </div>
+        </div>
+        <p id="scopeNotice" class="scope-notice" hidden></p>
+        <div class="overview-status-row">
+          <p id="status" class="status" role="status" aria-live="polite">正在连接 Canvas…</p>
+          <span id="courseCount" class="course-count">0 门课程</span>
+        </div>
+        <label class="sr-only" for="progress">课程整理进度</label>
+        <progress id="progress" max="100" value="0">0%</progress>
+        <p class="source-hint">读取期间保持 Canvas Dashboard 和本页打开。</p>
+      </section>
+
+      <section class="overview-results" aria-label="课程介绍与视频状态">
+        <div id="courseGrid" class="course-grid" role="list" aria-label="课程列表"></div>
+        <div id="emptyState" class="card empty-state">
+          <h2 id="emptyTitle">正在读取课程列表</h2>
+          <p id="emptyText">课程介绍和视频状态会逐门显示在这里。</p>
+        </div>
+      </section>
+      <footer class="page-footer">课程介绍来自 Canvas 首页或课程大纲。</footer>
+    </main>
+  </body>
+</html>

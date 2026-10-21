@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light">
+    <title>canvas-helper · 批量下载</title>
+    <link rel="stylesheet" href="dashboard.css">
+    <script type="module" src="dashboard.js"></script>
+  </head>
+  <body>
+    <main class="workspace">
+      <header class="page-header">
+        <div>
+          <p class="eyebrow">canvas-helper · EDGE 扩展</p>
+          <h1>讲座转录稿，批量下载。</h1>
+          <p class="page-intro">扫描课程中的讲座，批量保存转录稿，也可同时下载视频。</p>
+        </div>
+        <span class="header-badge">课程下载工作台</span>
+      </header>
+
+      <section class="card action-card" aria-labelledby="courseHeading">
+        <div class="course-context">
+          <div class="section-number" aria-hidden="true">01</div>
+          <div class="course-text">
+            <h2 id="courseHeading">当前课程</h2>
+            <p id="sourceLabel" class="source-label">等待从课程列表启动</p>
+          </div>
+        </div>
+
+        <div class="start-row">
+          <div class="start-copy">
+            <p class="action-title">准备好后，点一次就可以。</p>
+            <p class="muted">请保持课程列表和本页打开。扩展会自动处理讲座；登录过期时会提示。</p>
+          </div>
+          <div class="start-buttons">
+            <button id="primaryBtn" type="button" class="button primary">一键扫描并下载<span aria-hidden="true"> →</span></button>
+            <button id="scanBtn" type="button" class="button secondary">只扫描列表</button>
+          </div>
+        </div>
+
+        <div class="download-option-row">
+          <label class="video-option" for="includeVideo">
+            <input id="includeVideo" type="checkbox">
+            <span>同时下载视频</span>
+            <span class="option-hint">视频、转录稿和清单一起保存为一个 ZIP</span>
+          </label>
+        </div>
+      </section>
+
+      <section class="card progress-card" aria-labelledby="progressHeading">
+        <div class="progress-heading">
+          <h2 id="progressHeading">任务进度</h2>
+          <p id="status" class="status" role="status" aria-live="polite">尚未开始扫描</p>
+        </div>
+        <div class="progress-layout">
+          <div class="progress-track">
+            <label class="sr-only" for="progress">讲座下载进度</label>
+            <progress id="progress" max="100" value="0">0%</progress>
+          </div>
+          <dl class="stats">
+            <div class="stat">
+              <dt>讲座总数</dt>
+              <dd id="countTotal">0</dd>
+            </div>
+            <div class="stat">
+              <dt>已完成</dt>
+              <dd id="countDone">0</dd>
+            </div>
+            <div class="stat">
+              <dt>失败</dt>
+              <dd id="countFailed">0</dd>
+            </div>
+          </dl>
+        </div>
+      </section>
+
+      <section class="card sessions-card" aria-labelledby="sessionsHeading">
+        <div class="list-heading">
+          <div class="course-context">
+            <div class="section-number" aria-hidden="true">02</div>
+            <div>
+              <h2 id="sessionsHeading">选择讲座</h2>
+              <p class="muted section-description">扫描后可勾选需要的讲座。</p>
+            </div>
+          </div>
+          <div class="list-actions">
+            <button id="downloadBtn" type="button" class="button secondary" disabled>下载选中</button>
+            <button id="retryBtn" type="button" class="button ghost" disabled>重试失败</button>
+          </div>
+        </div>
+
+        <div class="selection-toolbar">
+          <label class="select-all-label" for="selectAll">
+            <input id="selectAll" type="checkbox" checked>
+            <span>全选讲座</span>
+          </label>
+        </div>
+        <div id="sessionsBody" class="session-grid" role="list" aria-label="课程讲座及下载状态"></div>
+
+        <div id="emptyState" class="empty-state">
+          <div class="empty-icon" aria-hidden="true"><span></span><span></span><span></span></div>
+          <h3>先选择一门课程</h3>
+          <p>回到 Canvas 的 Panopto 课程列表，点击浏览器扩展图标，即可从该课程开始。</p>
+        </div>
+
+        <div class="list-footer">
+          <p class="muted">可以随时停止，并保存已经获取的结果。</p>
+          <div class="footer-actions">
+            <button id="cancelBtn" type="button" class="button danger" disabled>停止</button>
+            <button id="saveBtn" type="button" class="button secondary" disabled>保存已有结果</button>
+          </div>
+        </div>
+      </section>
+
+      <div class="help-grid">
+        <details class="card disclosure">
+          <summary>首次使用说明</summary>
+          <div class="disclosure-content">
+            <ol class="instructions">
+              <li><strong>打开课程列表。</strong>在 Edge 登录 Canvas，进入该课程的 Panopto 讲座列表。</li>
+              <li><strong>从扩展图标启动。</strong>点击浏览器工具栏中的扩展图标，打开这页工作台。</li>
+              <li><strong>开始批量下载。</strong>点击“一键扫描并下载”。需要挑选讲座时，先点击“只扫描列表”。</li>
+            </ol>
+            <p class="help-note">没有转录稿或无法访问的讲座会显示处理结果，可在下方查看诊断记录。</p>
+          </div>
+        </details>
+
+        <details class="card disclosure diagnostic-details">
+          <summary>诊断与操作记录</summary>
+          <div class="disclosure-content">
+            <div class="diagnostic-toolbar">
+              <p class="muted">遇到问题时，可复制记录以便排查。</p>
+              <button id="copyDiagBtn" type="button" class="button small secondary">复制诊断信息</button>
+            </div>
+            <pre id="log" aria-live="polite" aria-label="操作记录"></pre>
+          </div>
+        </details>
+      </div>
+
+      <footer class="page-footer">Panopto 转录稿批量下载</footer>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,7 @@
+{
+  "name": "canvas-helper",
+  "version": "0.4.0",
+  "private": true,
+  "type": "module",
+  "scripts": {"test": "node collector.test.cjs && node client.test.cjs && node core.test.mjs && node zip-stream.test.mjs && node video-transfer.test.mjs && node dashboard.test.mjs && node canvas-client.test.cjs && node course-probe.test.mjs && node courses.test.mjs"}
+}
