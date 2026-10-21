@@ -1,10 +1,10 @@
-import {probeCourseVideo, closeProbeTab} from "./course-probe.js";
+import {probeCourseVideo, cancelVideoProbe} from "./course-probe.js";
 
 const $ = (id) => document.getElementById(id);
 const sourceParam = new URL(location.href).searchParams.get("sourceTab");
 const state = {
   sourceTabId: sourceParam && /^\d+$/.test(sourceParam) ? Number(sourceParam) : null,
-  catalog: null, scope: "", cache: new Map(), expanded: new Set(),
+  catalog: null, scope: "", cache: new Map(), collapsed: new Set(),
   injected: false, busy: false, controller: null, activeRun: null, requestId: 0
 };
 const failure = (message, code = "CANVAS_ERROR") => Object.assign(new Error(message), {code});
@@ -119,7 +119,7 @@ function link(label, href, className, courseId, control) {
 
 function videoLabel(video) {
   if (video?.status === "available") return Number.isInteger(video.count) && video.count > 0 ? `Panopto · ${video.count} 个视频` : "Panopto · 有视频";
-  return ({checking: "Panopto · 正在检查", empty: "Panopto · 暂无视频", not_found: "Panopto · 未发现入口", error: "Panopto · 读取失败"})[video?.status] || "Panopto · 等待检查";
+  return ({checking: "Panopto · 正在检查", linked: "Panopto · 已找到入口", empty: "Panopto · 暂无视频", not_found: "Panopto · 未发现入口", error: "Panopto · 读取失败"})[video?.status] || "Panopto · 等待检查";
 }
 
 function render() {
@@ -163,7 +163,7 @@ function render() {
     const canExpand = text.length > 180 || text.split("\n").length > 5;
     if (text) {
       description.textContent = text;
-      if (canExpand && !state.expanded.has(id)) description.className += " is-collapsed";
+      if (canExpand && state.collapsed.has(id)) description.className += " is-collapsed";
     } else {
       description.textContent = record?.error || detail?.message || (detail?.state === "empty" ? "课程首页和大纲暂未提供文字介绍。" : record?.phase === "reading" ? "正在读取课程介绍…" : "尚未读取课程介绍。");
       description.className += record?.error || detail?.state === "error" ? " is-error" : " is-placeholder";
@@ -172,10 +172,10 @@ function render() {
     if (canExpand) {
       const expand = document.createElement("button");
       expand.type = "button"; expand.className = "intro-expand";
-      expand.textContent = state.expanded.has(id) ? "收起介绍" : "展开完整介绍";
+      expand.textContent = state.collapsed.has(id) ? "展开完整介绍" : "收起介绍";
       expand.dataset.courseId = id; expand.dataset.control = "expand";
-      expand.setAttribute("aria-expanded", String(state.expanded.has(id))); expand.setAttribute("aria-controls", description.id);
-      expand.addEventListener("click", () => {if (state.expanded.has(id)) state.expanded.delete(id); else state.expanded.add(id); render();});
+      expand.setAttribute("aria-expanded", String(!state.collapsed.has(id))); expand.setAttribute("aria-controls", description.id);
+      expand.addEventListener("click", () => {if (state.collapsed.has(id)) state.collapsed.delete(id); else state.collapsed.add(id); render();});
       intro.append(rememberFocus(expand));
     }
     const source = safeLink(detail?.url, course);
@@ -245,13 +245,14 @@ async function performRun(controller, {reloadCatalog = false, scope} = {}) {
       if (!currentRecord?.detail || currentRecord.phase === "done") continue;
       status(`正在检查视频 ${index + 1} / ${courses.length}：${course.name}`);
       try {
-        currentRecord.phase = "checking"; currentRecord.video = {status: "checking", message: "正在查看课程视频列表…"}; render();
+        currentRecord.phase = "checking"; currentRecord.video = {status: "checking", message: "正在后台读取视频状态…"}; render();
         const record = currentRecord;
-        const result = await probeCourseVideo({...course, ...record.detail}, {signal, onStatus(message) {
+        const result = await probeCourseVideo({...course, ...record.detail}, {signal,
+          resolveTool: (url) => canvasCall("getVideoLinks", [id, url], signal), onStatus(message) {
           if (!signal.aborted && typeof message === "string") {record.video.message = message; render();}
         }});
         assertRunning(signal);
-        if (!["available", "empty", "not_found", "error"].includes(result?.status)) throw failure("视频列表未返回可识别的结果，请重新读取。", "PROBE_RESPONSE_ERROR");
+        if (!["available", "empty", "not_found", "linked", "error"].includes(result?.status)) throw failure("视频列表未返回可识别的结果，请重新读取。", "PROBE_RESPONSE_ERROR");
         currentRecord.video = result;
         currentRecord.phase = "done"; render();
         if (pauseCodes.has(result.code)) throw failure(result.message || "请完成学校登录后点“重新读取”。", result.code);
@@ -279,7 +280,7 @@ async function performRun(controller, {reloadCatalog = false, scope} = {}) {
       if (!state.catalog) {$("emptyTitle").textContent = "暂未读到课程列表"; $("emptyText").textContent = cause.message || "请检查 Canvas 登录状态后重新读取。";}
     }
   } finally {
-    await closeProbeTab().catch(() => {});
+    await cancelVideoProbe().catch(() => {});
     if (state.controller === controller) {state.busy = false; state.controller = null; render();}
   }
 }
@@ -302,5 +303,5 @@ async function requestRun(options = {}) {
 $("termSelect").addEventListener("change", () => {void requestRun({scope: $("termSelect").value});});
 $("refreshBtn").addEventListener("click", () => {void requestRun({reloadCatalog: true, scope: state.scope});});
 $("stopBtn").addEventListener("click", () => {state.requestId++; state.controller?.abort();});
-window.addEventListener("pagehide", () => {state.requestId++; state.controller?.abort(); void closeProbeTab().catch(() => {});});
+window.addEventListener("pagehide", () => {state.requestId++; state.controller?.abort(); void cancelVideoProbe().catch(() => {});});
 void requestRun({reloadCatalog: true});

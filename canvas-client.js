@@ -1,11 +1,12 @@
 (() => {
   "use strict";
-  const VERSION = "0.4.0";
+  const VERSION = "0.4.1";
   if (globalThis.CanvasOverviewClient?.version === VERSION) return;
 
   // This client runs in the isolated world of the Canvas tab granted activeTab.
   // It uses that page's session and never sends requests to another origin.
   const coursesById = new Map();
+  const toolsByCourse = new Map();
   const ID = /^[1-9]\d*$/;
   const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   const MAX_PAGES = 50;
@@ -133,6 +134,7 @@
   }
 
   function currentCourse(raw, now) {
+    if (raw.workflow_state === "completed" || raw.access_restricted_by_date === true) return false;
     const dates = courseDates(raw);
     return dates !== null && dates.start <= now && now < dates.end;
   }
@@ -161,7 +163,11 @@
       }
       const termsByKey = new Map();
       for (const course of courses) if (!termsByKey.has(course.termKey)) termsByKey.set(course.termKey, {key: course.termKey, name: course.termName});
-      const currentIds = courses.filter((course) => currentCourse(nextCache.get(course.id), Date.now())).map((course) => course.id);
+      // Canvas computes active enrollments using student/section date overrides;
+      // the public term range alone can include courses that have already ended.
+      const activeCourses = await list("/api/v1/courses", {enrollment_type: "student", enrollment_state: "active"});
+      const activeIds = new Set(activeCourses.map(raw => idText(raw.id)));
+      const currentIds = courses.filter((course) => activeIds.has(course.id) && currentCourse(nextCache.get(course.id), Date.now())).map((course) => course.id);
       const dashboardIds = dashboardCourseIds(nextCache);
       const defaultScope = currentIds.length ? "current" : dashboardIds.length ? "dashboard" : "all";
       const unknownDates = courses.some((course) => courseDates(nextCache.get(course.id)) === null);
@@ -171,6 +177,7 @@
         ? "课程日期未能确定当前学期，先显示 Dashboard 上的课程；可切换学期。"
         : "课程日期未能确定当前学期，请从上方选择学期。";
       coursesById.clear(); for (const [id, raw] of nextCache) coursesById.set(id, raw);
+      toolsByCourse.clear();
       return {ok: true, origin: canvasOrigin(), courses, terms: [...termsByKey.values()], currentIds, dashboardIds, defaultScope, notice};
     } catch (cause) { return resultError(cause); }
   }
@@ -286,10 +293,29 @@
       }
       for (const link of [...front.links, ...syllabus.links]) add(link.value, link.label);
       const navigationState = tabsResult.status === "fulfilled" ? "ready" : "error";
+      toolsByCourse.set(id, [...found.values()].filter(link => link.kind === "tool"));
       return {ok: true, id, intro, panoptoLinks: [...found.values()], navigationState,
         message: navigationState === "error" ? resultError(tabsResult.reason).message : ""};
     } catch (cause) { return resultError(cause); }
   }
 
-  globalThis.CanvasOverviewClient = Object.freeze({version: VERSION, getCatalog, getCourse});
+  async function getVideoLinks(courseId, launchUrl) {
+    const id = idText(courseId);
+    if (!(toolsByCourse.get(id) || []).some(link => link.url === launchUrl)) return {ok: false, code: "BAD_TARGET", message: "请先读取这门课程的视频入口。"};
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10000);
+    try {
+      // Read the inert launch HTML. Do not run its scripts or submit login forms.
+      const response = await globalThis.fetch(launchUrl, {method: "GET", credentials: "include", redirect: "manual", cache: "no-store",
+        headers: {Accept: "text/html"}, signal: controller.signal});
+      if (response.status === 429) return {ok: false, code: "RATE_LIMIT", message: "请求过多，请稍后重新读取。"};
+      if (!response.ok || response.type === "opaqueredirect" || (response.url && new URL(response.url).origin !== canvasOrigin())) return {ok: true, links: []};
+      const page = pageContent(await response.text());
+      const links = page.links.map(link => panoptoLink(link.value, link.label, id)).filter(link => link && link.kind !== "tool");
+      return {ok: true, links};
+    } catch {return {ok: true, links: []};}
+    finally {clearTimeout(timer);}
+  }
+
+  globalThis.CanvasOverviewClient = Object.freeze({version: VERSION, getCatalog, getCourse, getVideoLinks});
 })();

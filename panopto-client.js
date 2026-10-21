@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  const VERSION = "0.4.0";
+  const VERSION = "0.4.1";
   const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   const error = (code, message) => Object.assign(new Error(message), {code});
   const unwrap = (value) => {

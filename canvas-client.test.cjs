@@ -70,8 +70,8 @@ function course(extra = {}) {
     term: {id: 20262, name: "2026 Semester Two", start_at: "2026-07-20T00:00:00+12:00", end_at: "2026-11-30T00:00:00+13:00"},
     syllabus_body: "", ...extra};
 }
-function harness({steps, dashboard = [], url = ORIGIN + "/", expireTimer = false} = {}) {
-  const calls = [], errors = [], timers = new Set();
+function harness({steps, dashboard = [], url = ORIGIN + "/", expireTimer = false, activeCourses} = {}) {
+  const calls = [], activeCalls = [], errors = [], timers = new Set();
   class FrozenDate extends Date { static now() { return NOW; } }
   const context = {
     URL, URLSearchParams, AbortController, DOMException, Date: FrozenDate, DOMParser: FixtureDOMParser,
@@ -84,6 +84,11 @@ function harness({steps, dashboard = [], url = ORIGIN + "/", expireTimer = false
     clearTimeout(timer) { timers.delete(timer); clearTimeout(timer); },
     async fetch(value, options) {
       const target = new URL(value), index = calls.length;
+      if (target.pathname === CATALOG && target.searchParams.get("enrollment_state") === "active") {
+        activeCalls.push({url: target, options});
+        const data = activeCourses ?? steps.flatMap(step => Array.isArray(step.json) ? step.json.filter(item => item?.course_code) : []);
+        return {status: 200, ok: true, url: target.href, headers: {get: () => null}, text: async () => JSON.stringify(data)};
+      }
       const step = steps?.[index];
       calls.push({url: target, options});
       try {
@@ -92,7 +97,7 @@ function harness({steps, dashboard = [], url = ORIGIN + "/", expireTimer = false
         assert.equal(options.method, "GET");
         assert.equal(options.credentials, "include");
         assert.equal(options.redirect, "manual", "do not forward reads into an external login redirect");
-        assert.equal(options.headers.Accept, "application/json+canvas-string-ids");
+        assert.equal(options.headers.Accept, target.pathname.startsWith("/api/") ? "application/json+canvas-string-ids" : "text/html");
         if (step.path) assert.equal(target.pathname, step.path);
         step.check?.({url: target, options});
       } catch (cause) { errors.push(cause); throw cause; }
@@ -108,7 +113,7 @@ function harness({steps, dashboard = [], url = ORIGIN + "/", expireTimer = false
     }
   };
   vm.createContext(context); vm.runInContext(source, context, {filename: "canvas-client.js"});
-  return {client: context.CanvasOverviewClient, calls, context,
+  return {client: context.CanvasOverviewClient, calls, activeCalls, context,
     finish(count = steps?.length ?? 0) { assert.deepEqual(errors, []); assert.equal(calls.length, count); assert.equal(timers.size, 0); }};
 }
 
@@ -139,6 +144,52 @@ test("missing dates use only known Dashboard cards and never guess from semester
   assert.deepEqual(result.currentIds, []); assert.deepEqual(result.dashboardIds, ["12"]);
   assert.equal(result.defaultScope, "dashboard"); assert.match(result.notice, /日期/);
   h.finish();
+});
+
+test("server-computed active enrollments exclude past courses despite overlapping public term dates", async () => {
+  const h = harness({activeCourses: [{id: 12}, {id: 14}, {id: 15}], steps: [{json: [
+    course(), course({id: 13, name: "Past course with broad term dates"}),
+    course({id: 14, workflow_state: "completed"}), course({id: 15, access_restricted_by_date: true})
+  ]}]});
+  const result = serial(await h.client.getCatalog());
+  assert.deepEqual(result.currentIds, ["12"]);
+  assert.equal(result.courses.length, 4, "past courses remain available through their explicit semester");
+  assert.equal(h.activeCalls.length, 1);
+  assert.equal(h.activeCalls[0].url.searchParams.get("enrollment_type"), "student");
+  assert.equal(h.activeCalls[0].url.searchParams.get("enrollment_state"), "active");
+  h.finish();
+});
+
+test("completed enrollment overrides use the clearly labeled Dashboard fallback", async () => {
+  const h = harness({activeCourses: [], dashboard: ["/courses/12"], steps: [{json: [course()]}]});
+  const result = serial(await h.client.getCatalog());
+  assert.deepEqual(result.currentIds, []); assert.equal(result.defaultScope, "dashboard");
+  h.finish();
+});
+
+test("a discovered course tool is read as inert HTML and exposes only real Panopto links", async () => {
+  const tool = `${ORIGIN}/courses/12/external_tools/98`;
+  const h = harness({steps: [
+    {json: [course()]}, {path: FRONT, status: 404}, {path: TABS, json: [{label: "Panopto Video", html_url: tool}]},
+    {path: "/courses/12/external_tools/98", contentType: "text/html", text: `<script>window.open('https://unrelated.invalid')</script><iframe src="https://school.panopto.com/Panopto/Pages/EmbeddedList.aspx?folderID=${FOLDER}"></iframe>`}
+  ]});
+  await h.client.getCatalog(); await h.client.getCourse("12");
+  assert.equal((await h.client.getVideoLinks("13", tool)).ok, false);
+  assert.equal((await h.client.getVideoLinks("12", tool + "?invented=true")).ok, false);
+  const result = await h.client.getVideoLinks("12", tool);
+  assert.equal(result.ok, true); assert.equal(result.links.length, 1);
+  assert.equal(result.links[0].kind, "folder"); h.finish();
+});
+
+test("launch pages requiring a form or redirect return an entrance for the user to open", async () => {
+  for (const step of [{status: 0, type: "opaqueredirect"}, {status: 401}, {contentType: "text/html", text: '<form action="https://school.panopto.com/Panopto/LTI/LTI.aspx" method="post"><input name="oauth_signature" value="fixture-secret"></form>'}]) {
+    const tool = `${ORIGIN}/courses/12/external_tools/98`;
+    const h = harness({steps: [{json: [course()]}, {path: FRONT, status: 404}, {path: TABS, json: [{label: "Panopto", html_url: tool}]}, {...step, path: "/courses/12/external_tools/98"}]});
+    await h.client.getCatalog(); await h.client.getCourse("12");
+    const result = await h.client.getVideoLinks("12", tool);
+    assert.equal(result.ok, true); assert.deepEqual(serial(result.links), []);
+    assert.doesNotMatch(JSON.stringify(result), /fixture-secret/); h.finish();
+  }
 });
 
 test("a mixed current and undated catalog explains why undated courses are outside the default scope", async () => {

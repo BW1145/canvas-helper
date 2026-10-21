@@ -644,7 +644,7 @@ $("selectAll").addEventListener("change", (event) => {
   state.selected = event.target.checked ? new Set(state.rows.map((row) => row.key)) : new Set(); render();
 });
 $("copyDiagBtn").addEventListener("click", async () => {
-  const diagnostics = {extensionVersion: "0.4.0", expectedCount: state.totalExpected, detectedCount: state.rows.length,
+  const diagnostics = {extensionVersion: "0.4.1", expectedCount: state.totalExpected, detectedCount: state.rows.length,
     successCount: state.rows.filter((row) => row.status === "success").length,
     videoCount: state.rows.filter((row) => row.video?.status === "success").length,
     failures: state.rows.map((row, index) => ({item: index + 1, status: row.status, code: row.code || "", videoCode: row.video?.code || ""})).filter((row) => row.status === "error" || row.videoCode),

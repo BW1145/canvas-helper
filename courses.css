@@ -33,6 +33,8 @@
 .video-badge::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: #a4b0bf; flex-shrink: 0; }
 .video-available { color: #24714d; }
 .video-available::before { background: #42a473; }
+.video-linked { color: #315f91; }
+.video-linked::before { background: #739fd6; }
 .video-checking { color: #365d96; }
 .video-checking::before { background: #6f95cd; }
 .video-error { color: #9c5137; }

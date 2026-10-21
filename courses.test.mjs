@@ -51,7 +51,7 @@ function harness(options = {}) {
       probes.push({course, ...request}); trace.push(`probe:${course.id}`);
       return options.probe ? options.probe(course, request) : {status: "available", count: 4, url: `${origin}/courses/${course.id}/external_tools/20`, message: ""};
     },
-    async closeProbeTab() {trace.push("close-probe");}
+    async cancelVideoProbe() {trace.push("close-probe");}
   };
   vm.runInNewContext(source + "\nglobalThis.testApi = {state, requestRun, render, visibleCourses};", context);
   return {api: context.testApi, controls, calls, probes, trace, document, windowEvents,
@@ -120,14 +120,17 @@ test("empty, missing entrance, and failed reads remain distinct; a failed intro 
   assert.match(h.grid()[2].textContent, /Panopto · 未发现入口/);
 });
 
-test("long original text stays inert, expands intact, and keeps expansion and focus across updates", async () => {
+test("long original text is fully visible by default and retains user collapse and focus across updates", async () => {
   const original = "<img src=x onerror=alert(1)>\n" + "这一段是教师的完整原文。".repeat(28);
   const h = harness({detail(id) {const detail = defaultDetail(id); detail.intro.text = original; return detail;}});
   await h.done();
   let card = h.grid()[0], description = byClass(card, "course-description"), expand = byClass(card, "intro-expand");
-  assert.equal(description.textContent, original); assert.ok(description.className.includes("is-collapsed"));
+  assert.equal(description.textContent, original); assert.ok(!description.className.includes("is-collapsed"));
   assert.equal(descend(card, node => node.tag === "img"), null);
   expand.focus(); expand.events.click();
+  card = h.grid()[0]; description = byClass(card, "course-description"); expand = byClass(card, "intro-expand");
+  assert.ok(description.className.includes("is-collapsed")); assert.equal(expand.attributes["aria-expanded"], "false");
+  expand.events.click();
   card = h.grid()[0]; description = byClass(card, "course-description"); expand = byClass(card, "intro-expand");
   assert.equal(description.textContent, original); assert.ok(!description.className.includes("is-collapsed"));
   assert.equal(expand.attributes["aria-expanded"], "true"); assert.equal(h.document.activeElement, expand);
@@ -147,6 +150,16 @@ test("unsafe or unrelated links are not rendered as course or video actions", as
   assert.equal(byClass(h.grid()[0], "video-link"), null);
   assert.equal(byClass(h.grid()[1], "video-link"), null);
   assert.ok(byClass(h.grid()[1], "course-home-link"));
+});
+
+test("interactive entrances stay distinct from read failures while every course continues checking", async () => {
+  const h = harness({probe(course) {return {status: "linked", count: null, url: `${origin}/courses/${course.id}/external_tools/20`, message: "请打开视频列表完成学校登录。"};}});
+  await h.done();
+  assert.equal(h.probes.length, 2);
+  assert.ok(h.grid().every(card => /已找到入口/.test(card.textContent)));
+  assert.ok(h.grid().every(card => !/读取失败|暂无视频/.test(card.textContent)));
+  assert.ok(h.grid().every(card => byClass(card, "video-link")));
+  assert.doesNotMatch(h.controls.get("status").textContent, /未能读取/);
 });
 
 test("stop during a stalled video probe retains all introductions and cleans the temporary tab", async () => {
