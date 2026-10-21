@@ -1,6 +1,6 @@
 # canvas-helper
 
-用于 Microsoft Edge 的 Canvas 课程总览与 Panopto 批量下载扩展，当前版本 **v0.5.0**。
+用于 Microsoft Edge 的 Canvas 课程总览与 Panopto 批量下载扩展，当前版本 **v0.5.1**。
 
 ## 功能
 

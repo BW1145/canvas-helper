@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  const VERSION = "0.5.0";
+  const VERSION = "0.5.1";
   if (globalThis.CanvasOverviewClient?.version === VERSION) return;
 
   // This client runs in the isolated world of the Canvas tab granted activeTab.
