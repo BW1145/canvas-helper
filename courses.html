@@ -4,53 +4,57 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="light">
-    <title>canvas-helper · 学期课程总览</title>
-    <link rel="stylesheet" href="dashboard.css">
+    <title>canvas-helper · 课程总览</title>
     <link rel="stylesheet" href="courses.css">
     <script type="module" src="courses.js"></script>
   </head>
   <body>
-    <main class="workspace overview-workspace">
-      <header class="page-header">
-        <div>
-          <p class="eyebrow">canvas-helper · EDGE 扩展</p>
-          <h1>学期课程总览</h1>
-          <p class="page-intro">课程介绍与 Panopto 视频，一页看清。</p>
+    <a class="skip-link" href="#courseReader">跳到课程介绍</a>
+    <main class="overview-workspace">
+      <header class="app-header">
+        <div class="app-identity">
+          <span class="app-mark" aria-hidden="true"><svg viewBox="0 0 28 28" fill="none"><path d="M4 5.5h7a5 5 0 0 1 3 1.2 5 5 0 0 1 3-1.2h7v17h-7a5 5 0 0 0-3 1.2 5 5 0 0 0-3-1.2H4zM14 7v16" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg></span>
+          <div><p class="app-name">canvas-helper</p><h1>课程总览</h1></div>
         </div>
-        <span class="header-badge">自动整理课程</span>
+        <p class="app-description">了解课程，再开始新学期。</p>
       </header>
 
-      <section class="card overview-controls" aria-label="学期与整理进度">
+      <section class="overview-controls" aria-label="学期与读取进度">
         <div class="overview-toolbar">
-          <label class="term-field" for="termSelect">
-            <span>查看学期</span>
-            <select id="termSelect" disabled>
-              <option value="">正在读取课程…</option>
-            </select>
-          </label>
-          <div class="overview-actions">
-            <button id="refreshBtn" type="button" class="button secondary" disabled>重新读取</button>
-            <button id="stopBtn" type="button" class="button danger" disabled>停止</button>
-          </div>
+          <label class="term-field" for="termSelect"><span>查看学期</span><select id="termSelect" disabled><option value="">正在读取课程…</option></select></label>
+          <div class="overview-actions"><button id="refreshBtn" type="button" class="button secondary" disabled>重新读取</button><button id="stopBtn" type="button" class="button quiet" disabled>停止</button></div>
         </div>
         <p id="scopeNotice" class="scope-notice" hidden></p>
-        <div class="overview-status-row">
-          <p id="status" class="status" role="status" aria-live="polite">正在连接 Canvas…</p>
-          <span id="courseCount" class="course-count">0 门课程</span>
-        </div>
-        <label class="sr-only" for="progress">课程整理进度</label>
-        <progress id="progress" max="100" value="0">0%</progress>
-        <p class="source-hint">读取期间保持 Canvas Dashboard 和本页打开。</p>
+        <div class="overview-status-row"><p id="status" role="status" aria-live="polite">正在连接 Canvas…</p><span id="courseCount">0 门课程</span></div>
+        <label class="sr-only" for="progress">课程整理进度</label><progress id="progress" max="100" value="0">0%</progress>
       </section>
 
-      <section class="overview-results" aria-label="课程介绍与视频状态">
-        <div id="courseGrid" class="course-grid" role="list" aria-label="课程列表"></div>
-        <div id="emptyState" class="card empty-state">
-          <h2 id="emptyTitle">正在读取课程列表</h2>
-          <p id="emptyText">课程介绍和视频状态会逐门显示在这里。</p>
+      <div class="overview-layout">
+        <nav id="courseDirectory" class="course-directory" aria-label="选择课程" data-open="false">
+          <div class="directory-heading"><h2>我的课程</h2><span id="directoryCount">0</span></div>
+          <button id="directoryToggle" class="directory-toggle" type="button" aria-expanded="false" aria-controls="courseList"><span>选择课程</span><strong id="selectedCourseLabel">正在读取…</strong><span class="directory-chevron" aria-hidden="true">⌄</span></button>
+          <ul id="courseList" class="directory-items"></ul>
+          <p class="directory-note">滚动查看全部课程，选择后阅读完整介绍。</p>
+        </nav>
+
+        <div class="reading-column">
+          <article id="courseReader" class="course-reader" aria-labelledby="readerTitle" tabindex="-1" hidden>
+            <header class="reader-header">
+              <div class="reader-meta"><span id="readerCode"></span><span id="readerTerm"></span></div>
+              <h2 id="readerTitle" tabindex="-1"></h2>
+              <div class="reader-tools"><span id="readerVideo" class="video-badge"></span><div id="readerLinks" class="reader-links"></div></div>
+              <p id="readerVideoMessage" class="video-message" hidden></p>
+            </header>
+            <section class="reader-body" aria-labelledby="introHeading">
+              <div class="intro-heading"><h3 id="introHeading">课程介绍</h3><a id="readerSource" class="intro-source" target="_blank" rel="noopener noreferrer" hidden>查看原文</a></div>
+              <div id="readerDescription" class="course-description"></div>
+            </section>
+            <footer class="reader-footer"><button id="prevCourseBtn" class="button secondary" type="button">上一门</button><span id="readerPosition"></span><button id="nextCourseBtn" class="button secondary" type="button">下一门</button></footer>
+          </article>
+          <section id="emptyState" class="empty-state" aria-labelledby="emptyTitle"><h2 id="emptyTitle">正在读取课程列表</h2><p id="emptyText">课程介绍和视频状态会显示在这里。</p></section>
         </div>
-      </section>
-      <footer class="page-footer">课程介绍来自 Canvas 首页或课程大纲。</footer>
+      </div>
+      <footer class="app-footer">介绍来自 Canvas 课程首页或大纲。读取期间请保持 Dashboard 打开。</footer>
     </main>
   </body>
 </html>

@@ -10,7 +10,7 @@ import {cuesToText, srtToText, safeFilename, csvCell} from './transcript-utils.j
 // are fixtures. File writes become visible only after a successful close.
 const source = readFileSync(new URL('./dashboard.js', import.meta.url), 'utf8');
 const html = readFileSync(new URL('./dashboard.html', import.meta.url), 'utf8');
-const script = source.slice(0, source.indexOf('$("primaryBtn").addEventListener')).replace(/^import .*;\n/gm, '');
+const script = source.slice(0, source.indexOf('$("primaryBtn").addEventListener')).replace(/^import .*;\r?\n/gm, '');
 const signedUrl = 'https://media.example.invalid/lecture.mp4?signature=fixture-secret';
 const videoBytes = Buffer.from([0, 0, 0, 24, 102, 116, 121, 112, 105, 115, 111, 109, 0, 0, 2, 0, ...Array.from({length: 1200}, (_, i) => (i * 17) % 256)]);
 

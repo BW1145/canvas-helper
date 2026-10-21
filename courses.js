@@ -4,7 +4,7 @@ const $ = (id) => document.getElementById(id);
 const sourceParam = new URL(location.href).searchParams.get("sourceTab");
 const state = {
   sourceTabId: sourceParam && /^\d+$/.test(sourceParam) ? Number(sourceParam) : null,
-  catalog: null, scope: "", cache: new Map(), collapsed: new Set(),
+  catalog: null, scope: "", cache: new Map(), selectedId: null, directoryOpen: false, readerLinksKey: "",
   injected: false, busy: false, controller: null, activeRun: null, requestId: 0
 };
 const failure = (message, code = "CANVAS_ERROR") => Object.assign(new Error(message), {code});
@@ -122,80 +122,90 @@ function videoLabel(video) {
   return ({checking: "Panopto · 正在检查", linked: "Panopto · 已找到入口", empty: "Panopto · 暂无视频", not_found: "Panopto · 未发现入口", error: "Panopto · 读取失败"})[video?.status] || "Panopto · 等待检查";
 }
 
+function setText(id, text) {
+  const node = $(id), value = String(text ?? "");
+  if (node.textContent !== value) node.textContent = value;
+}
+
+function selectCourse(id) {
+  if (!visibleCourses().some(course => String(course.id) === String(id))) return;
+  state.selectedId = String(id); state.directoryOpen = false; render();
+  $("courseReader").scrollIntoView?.({block: "start"});
+  if (window.matchMedia?.("(max-width: 900px)").matches) $("readerTitle").focus({preventScroll: true});
+}
+
 function render() {
   const courses = visibleCourses();
+  if (!courses.some(course => String(course.id) === state.selectedId)) state.selectedId = courses.length ? String(courses[0].id) : null;
   const active = document.activeElement;
   const focusId = active?.dataset?.courseId, focusControl = active?.dataset?.control;
   let restoreFocus = null;
-  const rememberFocus = (node) => {
+  const rememberFocus = node => {
     if (node.dataset?.courseId === focusId && node.dataset?.control === focusControl) restoreFocus = node;
     return node;
   };
   $("refreshBtn").disabled = state.busy || state.sourceTabId === null;
   $("stopBtn").disabled = !state.busy;
   $("termSelect").disabled = !state.catalog;
-  $("courseCount").textContent = `${courses.length} 门课程`;
+  $("directoryToggle").disabled = !courses.length;
+  setText("courseCount", `${courses.length} 门课程`); setText("directoryCount", courses.length);
   const finished = courses.reduce((total, course) => {
     const record = state.cache.get(String(course.id));
     return total + (record?.phase === "done" ? 2 : record?.detail ? 1 : 0);
   }, 0);
   $("progress").value = courses.length ? Math.round(finished / (courses.length * 2) * 100) : 0;
-  $("progress").textContent = `${$("progress").value}%`;
+  setText("progress", `${$("progress").value}%`);
   $("emptyState").hidden = Boolean(courses.length);
+  $("courseReader").hidden = !courses.length;
   if (!courses.length && state.catalog) {
-    $("emptyTitle").textContent = "这个范围内没有课程";
-    $("emptyText").textContent = "可切换学期，或重新读取课程列表。";
+    setText("emptyTitle", "这个范围内没有课程"); setText("emptyText", "可切换学期，或重新读取课程列表。");
   }
   const fragment = document.createDocumentFragment();
   for (const course of courses) {
     const id = String(course.id), record = state.cache.get(id);
-    const card = document.createElement("article");
-    card.className = "card course-card"; card.setAttribute("role", "listitem"); card.dataset.courseId = id;
-    const heading = document.createElement("header"); heading.className = "course-card-heading";
-    const code = document.createElement("p"); code.className = "course-code"; code.textContent = course.code || "课程";
-    const name = document.createElement("h2"); name.className = "course-name"; name.textContent = course.name || course.code || "未命名课程";
-    const term = document.createElement("p"); term.className = "course-term"; term.textContent = course.termName || "未提供学期名称";
-    heading.append(code, name, term);
-    const intro = document.createElement("div"); intro.className = "course-intro";
-    const description = document.createElement("p"); description.className = "course-description"; description.id = `intro-${id}`;
-    const detail = record?.detail?.intro;
-    const text = String(detail?.text || "");
-    const canExpand = text.length > 180 || text.split("\n").length > 5;
-    if (text) {
-      description.textContent = text;
-      if (canExpand && state.collapsed.has(id)) description.className += " is-collapsed";
-    } else {
-      description.textContent = record?.error || detail?.message || (detail?.state === "empty" ? "课程首页和大纲暂未提供文字介绍。" : record?.phase === "reading" ? "正在读取课程介绍…" : "尚未读取课程介绍。");
-      description.className += record?.error || detail?.state === "error" ? " is-error" : " is-placeholder";
-    }
-    intro.append(description);
-    if (canExpand) {
-      const expand = document.createElement("button");
-      expand.type = "button"; expand.className = "intro-expand";
-      expand.textContent = state.collapsed.has(id) ? "展开完整介绍" : "收起介绍";
-      expand.dataset.courseId = id; expand.dataset.control = "expand";
-      expand.setAttribute("aria-expanded", String(!state.collapsed.has(id))); expand.setAttribute("aria-controls", description.id);
-      expand.addEventListener("click", () => {if (state.collapsed.has(id)) state.collapsed.delete(id); else state.collapsed.add(id); render();});
-      intro.append(rememberFocus(expand));
-    }
-    const source = safeLink(detail?.url, course);
-    if (source) intro.append(rememberFocus(link(`来源：${detail.sourceLabel || "课程介绍"} ↗`, source, "intro-source", id, "source")));
-    const video = document.createElement("div"); video.className = "course-video";
-    const badge = document.createElement("span");
-    const videoState = record?.video?.status || "pending";
-    badge.className = `video-badge video-${videoState}`; badge.textContent = videoLabel(record?.video);
-    video.append(badge);
-    if (record?.video?.message) {
-      const message = document.createElement("p"); message.className = "video-message"; message.textContent = record.video.message; video.append(message);
-    }
-    const links = document.createElement("div"); links.className = "course-links";
-    const home = safeLink(course.url, course);
-    if (home) links.append(rememberFocus(link("打开课程 ↗", home, "course-home-link", id, "home")));
-    const entrance = safeLink(record?.video?.url, course, true);
-    if (entrance) links.append(rememberFocus(link("视频列表 ↗", entrance, "video-link", id, "video")));
-    card.append(heading, intro, video, links); fragment.append(card);
+    const item = document.createElement("li"); item.className = "course-item";
+    const button = document.createElement("button"); button.type = "button"; button.className = "course-select";
+    button.dataset.courseId = id; button.dataset.control = "select";
+    button.setAttribute("aria-current", String(state.selectedId === id));
+    const code = document.createElement("span"); code.className = "directory-code"; code.textContent = course.code || "课程";
+    const name = document.createElement("span"); name.className = "directory-name"; name.textContent = course.name || course.code || "未命名课程";
+    const badge = document.createElement("span"); badge.className = `directory-state video-${record?.video?.status || "pending"}`;
+    badge.textContent = videoLabel(record?.video).replace(/^Panopto · /, "");
+    button.append(code, name, badge); button.addEventListener("click", () => selectCourse(id));
+    item.append(rememberFocus(button)); fragment.append(item);
   }
-  $("courseGrid").replaceChildren(fragment);
+  const list = $("courseList"), scrollTop = list.scrollTop;
+  list.replaceChildren(fragment); list.scrollTop = scrollTop;
+  $("courseDirectory").dataset.open = String(state.directoryOpen);
+  $("directoryToggle").setAttribute("aria-expanded", String(state.directoryOpen));
+  const course = courses.find(course => String(course.id) === state.selectedId);
+  if (course) {
+    const id = String(course.id), record = state.cache.get(id), detail = record?.detail?.intro;
+    setText("selectedCourseLabel", course.code || course.name);
+    setText("readerCode", course.code || "课程"); setText("readerTerm", course.termName || "未提供学期名称");
+    setText("readerTitle", course.name || course.code || "未命名课程");
+    const text = String(detail?.text || "");
+    setText("readerDescription", text || record?.error || detail?.message || (detail?.state === "empty" ? "课程首页和大纲暂未提供文字介绍。" : record?.phase === "reading" ? "正在读取课程介绍…" : "尚未读取课程介绍。"));
+    $("readerDescription").className = "course-description" + (text ? "" : record?.error || detail?.state === "error" ? " is-error" : " is-placeholder");
+    const source = safeLink(detail?.url, course);
+    $("readerSource").hidden = !source;
+    if (source) {$("readerSource").href = source; setText("readerSource", `查看${detail.sourceLabel || "课程介绍"}原文`);}
+    const video = record?.video;
+    $("readerVideo").className = `video-badge video-${video?.status || "pending"}`;
+    setText("readerVideo", videoLabel(video).replace(" · ", " "));
+    setText("readerVideoMessage", video?.message || ""); $("readerVideoMessage").hidden = !video?.message;
+    const home = safeLink(course.url, course), entrance = safeLink(video?.url, course, true);
+    const key = JSON.stringify([id, home, entrance]);
+    if (state.readerLinksKey !== key) {
+      const links = [];
+      if (home) links.push(rememberFocus(link("打开课程", home, "course-home-link", id, "home")));
+      if (entrance) links.push(rememberFocus(link("打开视频列表", entrance, "video-link", id, "video")));
+      $("readerLinks").replaceChildren(...links); state.readerLinksKey = key;
+    }
+    const index = courses.indexOf(course);
+    $("prevCourseBtn").disabled = index === 0; $("nextCourseBtn").disabled = index === courses.length - 1;
+    setText("readerPosition", `${index + 1} / ${courses.length}`);
+  } else setText("selectedCourseLabel", "选择课程");
   restoreFocus?.focus({preventScroll: true});
 }
 
@@ -217,7 +227,7 @@ async function performRun(controller, {reloadCatalog = false, scope} = {}) {
       renderScope(); render();
     }
     const courses = visibleCourses();
-    // Read every introduction before starting slower Panopto redirects.
+    // Read every introduction before checking video status in the background.
     for (let index = 0; index < courses.length; index++) {
       assertRunning(signal);
       const course = courses[index], id = String(course.id);
@@ -300,6 +310,9 @@ async function requestRun(options = {}) {
   if (state.activeRun === task) state.activeRun = null;
 }
 
+$("directoryToggle").addEventListener("click", () => {state.directoryOpen = !state.directoryOpen; render();});
+$("prevCourseBtn").addEventListener("click", () => {const courses = visibleCourses(); const index = courses.findIndex(course => String(course.id) === state.selectedId); if (index > 0) selectCourse(courses[index - 1].id);});
+$("nextCourseBtn").addEventListener("click", () => {const courses = visibleCourses(); const index = courses.findIndex(course => String(course.id) === state.selectedId); if (index >= 0 && index < courses.length - 1) selectCourse(courses[index + 1].id);});
 $("termSelect").addEventListener("change", () => {void requestRun({scope: $("termSelect").value});});
 $("refreshBtn").addEventListener("click", () => {void requestRun({reloadCatalog: true, scope: state.scope});});
 $("stopBtn").addEventListener("click", () => {state.requestId++; state.controller?.abort();});

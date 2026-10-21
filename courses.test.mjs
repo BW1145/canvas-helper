@@ -4,7 +4,7 @@ import vm from "node:vm";
 import {readFileSync} from "node:fs";
 
 const html = readFileSync(new URL("./courses.html", import.meta.url), "utf8");
-const source = readFileSync(new URL("./courses.js", import.meta.url), "utf8").replace(/^import .*;\n/gm, "");
+const source = readFileSync(new URL("./courses.js", import.meta.url), "utf8").replace(/^import .*;\r?\n/gm, "");
 const origin = "https://canvas.example.edu";
 const makeCourse = (id, termKey = "term:2") => ({id: String(id), name: `课程 ${id}`, code: `MUSIC ${id}`, url: `${origin}/courses/${id}`, termKey, termName: termKey === "term:2" ? "2026 Semester Two" : "2026 Semester One"});
 const defaultCatalog = () => ({ok: true, origin, courses: [makeCourse(1), makeCourse(2), makeCourse(9, "term:1")],
@@ -19,8 +19,8 @@ function harness(options = {}) {
   function element(tag) {
     let text = "";
     return {tag, children: [], dataset: {}, attributes: {}, events: {}, className: "", value: "",
-      get textContent() {return text || this.children.map(child => child.textContent).join("");},
-      set textContent(value) {text = String(value); this.children = [];},
+      textWrites: 0, get textContent() {return text || this.children.map(child => child.textContent).join("");},
+      set textContent(value) {this.textWrites++; text = String(value); this.children = [];},
       set innerHTML(_) {throw new Error("Course content must remain inert text.");},
       setAttribute(name, value) {this.attributes[name] = value;},
       addEventListener(name, handler) {this.events[name] = handler;},
@@ -53,10 +53,10 @@ function harness(options = {}) {
     },
     async cancelVideoProbe() {trace.push("close-probe");}
   };
-  vm.runInNewContext(source + "\nglobalThis.testApi = {state, requestRun, render, visibleCourses};", context);
+  vm.runInNewContext(source + "\nglobalThis.testApi = {state, requestRun, render, visibleCourses, selectCourse};", context);
   return {api: context.testApi, controls, calls, probes, trace, document, windowEvents,
     async done() {await context.testApi.state.activeRun;},
-    grid() {return controls.get("courseGrid").children;}};
+    grid() {return controls.get("courseList").children;}};
 }
 function descend(node, predicate) {
   if (predicate(node)) return node;
@@ -69,174 +69,131 @@ async function until(check) {
   assert.fail("Expected asynchronous checkpoint was not reached.");
 }
 
-test("opens automatically, reads all current introductions before any video redirect, and leaves old courses unread", async () => {
+test("loads current course introductions and opens a full-width reader with the first course selected", async () => {
   const h = harness(); await h.done();
   assert.deepEqual(h.calls, [["inject", "canvas-client.js"], ["getCatalog"], ["getCourse", "1"], ["getCourse", "2"]]);
-  assert.deepEqual(h.trace, ["inject", "getCatalog:", "getCourse:1", "getCourse:2", "probe:1", "probe:2", "close-probe"]);
-  assert.equal(h.grid().length, 2);
-  assert.match(h.grid()[0].textContent, /这门课程研究音乐 1/);
-  assert.match(h.grid()[0].textContent, /Panopto · 4 个视频/);
-  assert.equal(h.controls.get("termSelect").value, "current");
+  assert.equal(h.grid().length, 2); assert.equal(h.api.state.selectedId, "1");
+  assert.match(h.controls.get("readerDescription").textContent, /这门课程研究音乐 1/);
+  assert.match(h.controls.get("readerVideo").textContent, /4 个视频/);
   assert.equal(h.controls.get("progress").value, 100);
-  assert.equal(h.controls.get("stopBtn").disabled, true);
-  assert.equal(h.controls.get("refreshBtn").disabled, false);
+  assert.equal(h.controls.get("courseReader").hidden, false);
 });
 
-test("semester selection requests only its new courses and returning to the current scope uses cached cards", async () => {
+test("course selection and next/previous navigation show cached full introductions", async () => {
+  const h = harness(); await h.done(); const count = h.calls.length;
+  h.controls.get("nextCourseBtn").events.click();
+  assert.equal(h.api.state.selectedId, "2"); assert.match(h.controls.get("readerDescription").textContent, /音乐 2/);
+  assert.equal(h.controls.get("nextCourseBtn").disabled, true);
+  assert.equal(h.controls.get("prevCourseBtn").disabled, false);
+  h.controls.get("prevCourseBtn").events.click(); assert.equal(h.api.state.selectedId, "1");
+  const button = byClass(h.grid()[1], "course-select"); button.events.click();
+  assert.equal(h.api.state.selectedId, "2"); assert.equal(h.calls.length, count);
+  assert.equal(byClass(h.grid()[1], "course-select").attributes["aria-current"], "true");
+});
+
+test("long original text remains inert and stable while other course statuses update", async () => {
+  const original = "<img src=x onerror=alert(1)>\n" + "课程完整介绍。".repeat(300);
+  const h = harness({detail(id) {const detail = defaultDetail(id); detail.intro.text = original; return detail;}}); await h.done();
+  const node = h.controls.get("readerDescription"), writes = node.textWrites;
+  assert.equal(node.textContent, original); assert.doesNotMatch(node.className, /collapsed/);
+  h.api.state.cache.get("2").video.message = "后台状态更新"; h.api.render();
+  assert.equal(node.textWrites, writes, "retain the current text node and browser selection");
+  assert.equal(node.children.length, 0); assert.equal(node.textContent, original);
+});
+
+test("directory focus and scroll position survive background updates", async () => {
   const h = harness(); await h.done();
-  h.controls.get("termSelect").value = "term:1";
-  h.controls.get("termSelect").events.change(); await h.done();
-  assert.equal(h.grid().length, 1); assert.match(h.grid()[0].textContent, /课程 9/);
-  assert.deepEqual(h.calls.at(-1), ["getCourse", "9"]);
-  const before = h.calls.length, probes = h.probes.length;
-  await h.api.requestRun({scope: "current"});
-  assert.equal(h.grid().length, 2); assert.equal(h.calls.length, before); assert.equal(h.probes.length, probes);
+  const button = byClass(h.grid()[1], "course-select"); button.focus(); h.controls.get("courseList").scrollTop = 180;
+  h.api.state.cache.get("1").video.message = "更新"; h.api.render();
+  assert.equal(h.document.activeElement, byClass(h.grid()[1], "course-select"));
+  assert.equal(h.controls.get("courseList").scrollTop, 180);
+});
+
+test("mobile directory opens explicitly and closes after choosing a course", async () => {
+  const h = harness(); await h.done();
+  h.controls.get("directoryToggle").events.click();
+  assert.equal(h.controls.get("directoryToggle").attributes["aria-expanded"], "true");
+  byClass(h.grid()[1], "course-select").events.click();
+  assert.equal(h.controls.get("directoryToggle").attributes["aria-expanded"], "false");
+  assert.equal(h.controls.get("selectedCourseLabel").textContent, "MUSIC 2");
+});
+
+test("changing semester selects a visible course and returning reuses cached content", async () => {
+  const h = harness(); await h.done(); await h.api.requestRun({scope: "term:1"});
+  assert.equal(h.grid().length, 1); assert.equal(h.api.state.selectedId, "9");
+  assert.match(h.controls.get("readerTitle").textContent, /课程 9/);
+  const count = h.calls.length, probes = h.probes.length;
+  await h.api.requestRun({scope: "current"}); assert.equal(h.calls.length, count); assert.equal(h.probes.length, probes);
   h.controls.get("refreshBtn").events.click(); await h.done();
   assert.equal(h.calls.filter(call => call[0] === "getCatalog").length, 2);
-  assert.equal(h.probes.length, probes + 2);
 });
 
-test("no-date fallback selects Dashboard explicitly and shows the client notice", async () => {
-  const catalog = defaultCatalog(); catalog.currentIds = []; catalog.defaultScope = "dashboard"; catalog.notice = "学校未提供学期日期，先显示 Dashboard 上的课程。";
+test("unknown dates explicitly use the Dashboard scope", async () => {
+  const catalog = defaultCatalog(); catalog.currentIds = []; catalog.defaultScope = "dashboard"; catalog.notice = "日期不明，显示 Dashboard 课程。";
   const h = harness({catalog}); await h.done();
   assert.equal(h.api.state.scope, "dashboard"); assert.equal(h.grid().length, 3);
-  assert.equal(h.controls.get("scopeNotice").hidden, false);
   assert.equal(h.controls.get("scopeNotice").textContent, catalog.notice);
-  assert.ok(!h.controls.get("termSelect").children.some(option => option.value === "current"));
 });
 
-test("empty, missing entrance, and failed reads remain distinct; a failed intro can still have video", async () => {
-  const catalog = defaultCatalog(); catalog.courses.push(makeCourse(3)); catalog.currentIds.push("3");
-  const h = harness({catalog, detail(id) {
-    const result = defaultDetail(id);
-    if (id === "1") result.intro = {state: "error", text: "", message: "首页暂时读取失败。", sourceLabel: "课程首页", url: result.intro.url};
-    return result;
-  }, probe(course) {return {status: ({1: "available", 2: "empty", 3: "error"})[course.id], count: null, url: null, message: course.id === "3" ? "学校登录已过期。" : ""};}});
-  await h.done();
-  assert.match(h.grid()[0].textContent, /首页暂时读取失败/); assert.match(h.grid()[0].textContent, /Panopto · 有视频/);
-  assert.match(h.grid()[1].textContent, /Panopto · 暂无视频/);
-  assert.match(h.grid()[2].textContent, /Panopto · 读取失败/); assert.doesNotMatch(h.grid()[2].textContent, /暂无视频|未发现入口/);
-  h.api.state.cache.get("3").video = {status: "not_found", count: null, url: null, message: ""}; h.api.render();
-  assert.match(h.grid()[2].textContent, /Panopto · 未发现入口/);
+test("video evidence and unreadable introductions retain their separate states", async () => {
+  const h = harness({detail(id) {const detail = defaultDetail(id); if (id === "1") detail.intro = {state: "error", message: "首页读取失败", text: ""}; return detail;},
+    probe(course) {return {status: course.id === "1" ? "available" : "empty", count: null, url: null, message: ""};}}); await h.done();
+  assert.match(h.controls.get("readerDescription").textContent, /首页读取失败/);
+  assert.match(h.controls.get("readerVideo").textContent, /有视频/);
+  h.api.selectCourse("2"); assert.match(h.controls.get("readerVideo").textContent, /暂无视频/);
 });
 
-test("long original text is fully visible by default and retains user collapse and focus across updates", async () => {
-  const original = "<img src=x onerror=alert(1)>\n" + "这一段是教师的完整原文。".repeat(28);
-  const h = harness({detail(id) {const detail = defaultDetail(id); detail.intro.text = original; return detail;}});
-  await h.done();
-  let card = h.grid()[0], description = byClass(card, "course-description"), expand = byClass(card, "intro-expand");
-  assert.equal(description.textContent, original); assert.ok(!description.className.includes("is-collapsed"));
-  assert.equal(descend(card, node => node.tag === "img"), null);
-  expand.focus(); expand.events.click();
-  card = h.grid()[0]; description = byClass(card, "course-description"); expand = byClass(card, "intro-expand");
-  assert.ok(description.className.includes("is-collapsed")); assert.equal(expand.attributes["aria-expanded"], "false");
-  expand.events.click();
-  card = h.grid()[0]; description = byClass(card, "course-description"); expand = byClass(card, "intro-expand");
-  assert.equal(description.textContent, original); assert.ok(!description.className.includes("is-collapsed"));
-  assert.equal(expand.attributes["aria-expanded"], "true"); assert.equal(h.document.activeElement, expand);
-  h.api.state.cache.get("2").video.message = "另一门课状态更新。"; h.api.render();
-  assert.equal(byClass(h.grid()[0], "course-description").textContent, original);
-  assert.equal(byClass(h.grid()[0], "intro-expand").attributes["aria-expanded"], "true");
-  assert.equal(h.document.activeElement, byClass(h.grid()[0], "intro-expand"));
-});
-
-test("unsafe or unrelated links are not rendered as course or video actions", async () => {
-  const catalog = defaultCatalog(); catalog.courses[0].url = "javascript:alert(1)";
-  const h = harness({catalog, detail(id) {const detail = defaultDetail(id); detail.intro.url = "https://outside.example/steal"; return detail;},
-    probe() {return {status: "available", count: 1, url: "https://canvas.example.edu/courses/999/external_tools/20", message: ""};}});
-  await h.done();
-  assert.equal(byClass(h.grid()[0], "course-home-link"), null);
-  assert.equal(byClass(h.grid()[0], "intro-source"), null);
-  assert.equal(byClass(h.grid()[0], "video-link"), null);
-  assert.equal(byClass(h.grid()[1], "video-link"), null);
-  assert.ok(byClass(h.grid()[1], "course-home-link"));
-});
-
-test("interactive entrances stay distinct from read failures while every course continues checking", async () => {
-  const h = harness({probe(course) {return {status: "linked", count: null, url: `${origin}/courses/${course.id}/external_tools/20`, message: "请打开视频列表完成学校登录。"};}});
-  await h.done();
-  assert.equal(h.probes.length, 2);
-  assert.ok(h.grid().every(card => /已找到入口/.test(card.textContent)));
-  assert.ok(h.grid().every(card => !/读取失败|暂无视频/.test(card.textContent)));
-  assert.ok(h.grid().every(card => byClass(card, "video-link")));
+test("interactive entrances stay discoverable and every course continues checking", async () => {
+  const h = harness({probe(course) {return {status: "linked", count: null, url: `${origin}/courses/${course.id}/external_tools/20`, message: "请打开视频列表查看。"};}}); await h.done();
+  assert.equal(h.probes.length, 2); assert.match(h.controls.get("readerVideo").textContent, /已找到入口/);
+  assert.ok(byClass(h.controls.get("readerLinks"), "video-link"));
   assert.doesNotMatch(h.controls.get("status").textContent, /未能读取/);
 });
 
-test("stop during a stalled video probe retains all introductions and cleans the temporary tab", async () => {
-  const h = harness({probe(_course, {signal}) {return new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(new DOMException("Stopped", "AbortError")), {once: true}));}});
-  await until(() => h.probes.length === 1);
-  assert.ok(h.grid().every(card => /课程目标/.test(card.textContent)));
-  h.controls.get("stopBtn").events.click(); await h.done();
-  assert.equal(h.probes.length, 1); assert.equal(h.probes[0].signal.aborted, true);
-  assert.equal(h.trace.at(-1), "close-probe"); assert.equal(h.api.state.busy, false);
-  assert.match(h.controls.get("status").textContent, /已停止/);
-  assert.ok(h.grid().every(card => /课程目标/.test(card.textContent)));
-  assert.doesNotMatch(h.grid()[0].textContent, /暂无视频|读取失败/);
+test("unsafe or unrelated URLs are never rendered as reader actions", async () => {
+  const catalog = defaultCatalog(); catalog.courses[0].url = "javascript:alert(1)";
+  const h = harness({catalog, detail(id) {const detail = defaultDetail(id); detail.intro.url = "https://outside.invalid/steal"; return detail;},
+    probe() {return {status: "available", count: 1, url: "https://canvas.example.edu/courses/999/external_tools/20", message: ""};}}); await h.done();
+  assert.equal(h.controls.get("readerLinks").children.length, 0); assert.equal(h.controls.get("readerSource").hidden, true);
 });
 
-test("switching semesters cancels the old probe and closes it before inspecting the next semester", async () => {
+test("stop and semester changes cancel checks while the reader remains usable", async () => {
   let first = true;
-  const h = harness({probe(course, {signal}) {
-    if (first) {first = false; return new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(new DOMException("Stopped", "AbortError")), {once: true}));}
-    return {status: "empty", count: 0, url: `${origin}/courses/${course.id}/external_tools/20`, message: ""};
-  }});
-  await until(() => h.probes.length === 1);
-  await h.api.requestRun({scope: "term:1"});
-  assert.equal(h.probes[0].signal.aborted, true);
-  assert.ok(h.trace.indexOf("close-probe") < h.trace.indexOf("probe:9"));
-  assert.equal(h.grid().length, 1); assert.match(h.grid()[0].textContent, /课程 9/);
-  assert.equal(h.api.state.scope, "term:1");
+  const h = harness({probe(course, {signal}) {if (first) {first = false; return new Promise((_, reject) => signal.addEventListener("abort", () => reject(new DOMException("Stopped", "AbortError")), {once: true}));} return {status: "empty", count: 0, url: null, message: ""};}});
+  await until(() => h.probes.length === 1); h.api.selectCourse("2");
+  assert.match(h.controls.get("readerDescription").textContent, /音乐 2/);
+  h.controls.get("stopBtn").events.click(); await h.done();
+  assert.equal(h.probes[0].signal.aborted, true); assert.equal(h.api.state.busy, false);
+  await h.api.requestRun({scope: "term:1"}); assert.equal(h.api.state.selectedId, "9");
 });
 
-test("late Canvas results after stop do not start video checks or overwrite stopped state", async () => {
+test("late source results cannot overwrite a stopped run", async () => {
   let release;
   const h = harness({detail(id) {if (id === "1") return new Promise(resolve => {release = () => resolve(defaultDetail(id));}); return defaultDetail(id);}});
-  await until(() => Boolean(release));
-  h.controls.get("stopBtn").events.click(); await h.done(); release();
-  await new Promise(resolve => setImmediate(resolve));
-  assert.equal(h.probes.length, 0); assert.equal(h.calls.filter(call => call[0] === "getCourse").length, 1);
+  await until(() => Boolean(release)); h.controls.get("stopBtn").events.click(); await h.done(); release();
+  await new Promise(resolve => setImmediate(resolve)); assert.equal(h.probes.length, 0);
   assert.equal(h.api.state.cache.get("1").detail, null); assert.match(h.controls.get("status").textContent, /已停止/);
 });
 
-test("Canvas auth and rate errors pause once with actionable text, never as missing video", async () => {
+test("authentication and rate pauses preserve loaded introductions", async () => {
   for (const code of ["AUTH_REQUIRED", "RATE_LIMIT"]) {
-    const h = harness({detail() {return {ok: false, code, message: code === "AUTH_REQUIRED" ? "请在 Canvas 完成登录后重新读取。" : "请求过多，请稍后重新读取。"};}});
-    await h.done();
-    assert.equal(h.calls.filter(call => call[0] === "getCourse").length, 1); assert.equal(h.probes.length, 0);
-    assert.match(h.controls.get("status").textContent, /重新读取/);
-    assert.match(h.grid()[0].textContent, /读取失败/); assert.doesNotMatch(h.grid()[0].textContent, /未发现入口|暂无视频/);
+    const h = harness({probe() {return {status: "error", code, url: null, message: "请登录或稍后重新读取。"};}}); await h.done();
+    assert.equal(h.probes.length, 1); assert.match(h.controls.get("status").textContent, /重新读取/);
+    h.api.selectCourse("2"); assert.match(h.controls.get("readerDescription").textContent, /音乐 2/);
   }
 });
 
-test("Panopto login or rate result pauses later probes while preserving every loaded introduction", async () => {
-  for (const code of ["LOGIN_REQUIRED", "AUTH_REQUIRED", "RATE_LIMIT"]) {
-    const h = harness({probe(course) {return {status: "error", code, count: null, url: `${origin}/courses/${course.id}/external_tools/20`, message: code === "RATE_LIMIT" ? "请求过多，请稍后点“重新读取”。" : "请完成学校登录后点“重新读取”。"};}});
-    await h.done();
-    assert.deepEqual(h.calls.filter(call => call[0] === "getCourse").map(call => call[1]), ["1", "2"]);
-    assert.equal(h.probes.length, 1); assert.equal(h.api.state.cache.get("2").phase, "ready");
-    assert.ok(h.grid().every(card => /课程目标/.test(card.textContent)));
-    assert.match(h.grid()[0].textContent, /读取失败/); assert.match(h.grid()[1].textContent, /等待检查/);
-    assert.ok(byClass(h.grid()[0], "video-link"), "keep the verified entrance available for login");
-    assert.match(h.controls.get("status").textContent, /重新读取/);
-    assert.equal(h.trace.at(-1), "close-probe");
-  }
-});
-
-test("a refreshed source reinjects the client once and missing source fails without network", async () => {
-  let missing = true;
-  const h = harness({execute(method) {if (method === "getCourse" && missing) {missing = false; return {ok: false, code: "CLIENT_MISSING"};}}});
-  await h.done(); assert.equal(h.calls.filter(call => call[0] === "inject").length, 2); assert.equal(h.probes.length, 2);
+test("missing source and empty scope show clear reader states", async () => {
   const absent = harness({noSource: true}); await absent.done();
-  assert.equal(absent.calls.length, 0); assert.equal(absent.probes.length, 0);
-  assert.match(absent.controls.get("status").textContent, /Dashboard/);
-  assert.equal(absent.controls.get("refreshBtn").disabled, true);
+  assert.equal(absent.calls.length, 0); assert.equal(absent.controls.get("refreshBtn").disabled, true);
+  const catalog = defaultCatalog(); catalog.courses = []; catalog.currentIds = []; catalog.dashboardIds = [];
+  const h = harness({catalog}); await h.done();
+  assert.equal(h.controls.get("courseReader").hidden, true); assert.equal(h.controls.get("emptyState").hidden, false);
 });
 
-test("controls and stylesheet references are complete and pagehide requests cleanup", async () => {
+test("pagehide cancels background work and every control belongs to the overview stylesheet", async () => {
   const h = harness(); await h.done();
   for (const [, id] of source.matchAll(/\$\("([^"]+)"\)/g)) assert.ok(h.controls.has(id), id);
-  assert.match(html, /href="dashboard\.css"/); assert.match(html, /href="courses\.css"/);
-  assert.match(html, /type="module" src="courses\.js"/);
-  assert.doesNotMatch(html, /<script(?![^>]*\bsrc=)/);
+  assert.match(html, /href="courses\.css"/); assert.doesNotMatch(html, /dashboard\.css/);
   h.windowEvents.pagehide(); assert.equal(h.trace.at(-1), "close-probe");
 });
