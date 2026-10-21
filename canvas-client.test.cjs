@@ -276,6 +276,11 @@ test("wiki introduction keeps original readable text, removes hidden/script cont
   assert.equal((await h.client.getCatalog()).ok, true);
   const result = serial(await h.client.getCourse("12"));
   assert.equal(result.intro.text, "Welcome & listen\n\nLearn harmony together.\n\n• Analysis\n\n• Writing");
+  assert.deepEqual(result.intro.content, [
+    {tag: "h3", children: ["Welcome & listen"]},
+    {tag: "p", children: ["Learn ", {tag: "strong", children: ["harmony"]}, " together."]},
+    {tag: "ul", children: [{tag: "li", children: ["Analysis"]}, {tag: "li", children: ["Writing"]}]}
+  ]);
   assert.equal(result.intro.sourceLabel, "课程首页");
   assert.equal(result.intro.url, `${ORIGIN}/courses/12/pages/welcome`);
   assert.equal(result.navigationState, "ready");

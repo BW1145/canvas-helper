@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  const VERSION = "0.4.1";
+  const VERSION = "0.5.0";
   if (globalThis.CanvasOverviewClient?.version === VERSION) return;
 
   // This client runs in the isolated world of the Canvas tab granted activeTab.
@@ -49,11 +49,11 @@
         headers: {Accept: "application/json+canvas-string-ids"}, signal: controller.signal
       });
       if (response.type === "opaqueredirect" || (response.status >= 300 && response.status < 400) || response.status === 401) {
-        throw fail("AUTH_REQUIRED", "Canvas 需要重新登录。请回到 Dashboard 完成登录，再点击“重新读取”。");
+        throw fail("AUTH_REQUIRED", "Canvas 需要重新登录。请回到 Dashboard 完成登录，再点击“刷新”。");
       }
       if (response.status === 403) throw fail("ACCESS_DENIED", "当前账户无法读取这部分课程内容。");
       if (response.status === 404) throw fail("NOT_FOUND", "课程尚未提供这个页面。");
-      if (response.status === 429) throw fail("RATE_LIMIT", "Canvas 要求放慢请求，请稍后点击“重新读取”继续。");
+      if (response.status === 429) throw fail("RATE_LIMIT", "Canvas 要求放慢请求，请稍后点击“刷新”继续。");
       if (!response.ok) throw fail("HTTP_ERROR", `Canvas 请求未完成（HTTP ${response.status}）。`);
       const finalUrl = new URL(response.url || target.href, target.href);
       if (finalUrl.origin !== target.origin || finalUrl.pathname !== path) throw fail("AUTH_REQUIRED", "Canvas 返回了登录或跳转页面，请回到 Dashboard 确认登录后重试。");
@@ -191,7 +191,7 @@
   }
 
   function pageContent(html) {
-    if (typeof html !== "string" || !html.trim()) return {text: "", links: []};
+    if (typeof html !== "string" || !html.trim()) return {text: "", content: [], links: []};
     const parsed = new DOMParser().parseFromString(html, "text/html");
     const omitted = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "TEMPLATE", "HEAD", "NAV", "FORM", "BUTTON", "INPUT", "SELECT", "TEXTAREA", "SVG", "CANVAS", "OBJECT", "EMBED", "IFRAME"]);
     const blocks = new Set(["P", "DIV", "SECTION", "ARTICLE", "HEADER", "FOOTER", "H1", "H2", "H3", "H4", "H5", "H6", "UL", "OL", "LI", "BLOCKQUOTE", "PRE", "TR", "TABLE", "DL", "DT", "DD"]);
@@ -209,7 +209,20 @@
       value: node.getAttribute(node.tagName === "IFRAME" ? "src" : "href"),
       label: clean(`${node.textContent || ""} ${node.getAttribute("title") || ""} ${node.getAttribute("aria-label") || ""}`)
     }));
-    return {text, links};
+    // Transfer only text and a small set of structural tags. Source attributes,
+    // styles, links, embedded media and executable markup never enter the reader.
+    const tags = {P: "p", DIV: "div", SECTION: "div", ARTICLE: "div", HEADER: "div", FOOTER: "div",
+      H1: "h3", H2: "h3", H3: "h4", H4: "h4", H5: "h4", H6: "h4", UL: "ul", OL: "ol", LI: "li",
+      STRONG: "strong", B: "strong", EM: "em", I: "em", BR: "br", PRE: "pre", CODE: "code", BLOCKQUOTE: "blockquote",
+      TABLE: "table", THEAD: "thead", TBODY: "tbody", TR: "tr", TD: "td", TH: "th", DL: "div", DT: "p", DD: "p"};
+    function structure(node) {
+      if (node.nodeType === 3) return [node.nodeValue];
+      if (node.nodeType !== 1 || omitted.has(node.tagName) || hidden(node)) return [];
+      const children = [...node.childNodes].flatMap(structure);
+      if (node.tagName === "HR") return [{tag: "br", children: []}];
+      return tags[node.tagName] ? [{tag: tags[node.tagName], children}] : children;
+    }
+    return {text, content: structure(parsed.body), links};
   }
 
   function getParameter(params, name) {
@@ -257,7 +270,7 @@
   async function getCourse(courseId) {
     try {
       const id = idText(courseId);
-      if (!ID.test(id) || !coursesById.has(id)) throw fail("COURSE_NOT_LISTED", "请先点击“重新读取”更新课程列表，再读取这门课程。");
+      if (!ID.test(id) || !coursesById.has(id)) throw fail("COURSE_NOT_LISTED", "请先点击“刷新”更新课程列表，再读取这门课程。");
       const raw = coursesById.get(id);
       const courseUrl = `${canvasOrigin()}/courses/${id}`;
       const syllabus = pageContent(raw.syllabus_body);
@@ -281,8 +294,8 @@
       } else if (frontResult.status === "rejected" && frontResult.reason?.code !== "NOT_FOUND") frontError = frontResult.reason;
 
       let intro;
-      if (preferSyllabus || (!front.text && syllabus.text)) intro = {text: syllabus.text, sourceLabel: "课程大纲", url: `${courseUrl}/assignments/syllabus`, state: "ready", message: frontError ? "首页读取未完成，已显示课程大纲。" : ""};
-      else if (front.text) intro = {text: front.text, sourceLabel: raw.default_view === "wiki" ? "课程首页" : "课程页面", url: frontUrl, state: "ready", message: ""};
+      if (preferSyllabus || (!front.text && syllabus.text)) intro = {text: syllabus.text, content: syllabus.content, sourceLabel: "课程大纲", url: `${courseUrl}/assignments/syllabus`, state: "ready", message: frontError ? "首页读取未完成，已显示课程大纲。" : ""};
+      else if (front.text) intro = {text: front.text, content: front.content, sourceLabel: raw.default_view === "wiki" ? "课程首页" : "课程页面", url: frontUrl, state: "ready", message: ""};
       else intro = {text: "", sourceLabel: "课程首页", url: courseUrl, state: frontError ? "error" : "empty", message: frontError ? resultError(frontError).message : "课程首页和大纲尚未提供文字介绍。"};
 
       const found = new Map();
@@ -308,7 +321,7 @@
       // Read the inert launch HTML. Do not run its scripts or submit login forms.
       const response = await globalThis.fetch(launchUrl, {method: "GET", credentials: "include", redirect: "manual", cache: "no-store",
         headers: {Accept: "text/html"}, signal: controller.signal});
-      if (response.status === 429) return {ok: false, code: "RATE_LIMIT", message: "请求过多，请稍后重新读取。"};
+      if (response.status === 429) return {ok: false, code: "RATE_LIMIT", message: "请求过多，请稍后刷新。"};
       if (!response.ok || response.type === "opaqueredirect" || (response.url && new URL(response.url).origin !== canvasOrigin())) return {ok: true, links: []};
       const page = pageContent(await response.text());
       const links = page.links.map(link => panoptoLink(link.value, link.label, id)).filter(link => link && link.kind !== "tool");

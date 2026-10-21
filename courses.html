@@ -9,52 +9,42 @@
     <script type="module" src="courses.js"></script>
   </head>
   <body>
-    <a class="skip-link" href="#courseReader">跳到课程介绍</a>
-    <main class="overview-workspace">
-      <header class="app-header">
-        <div class="app-identity">
-          <span class="app-mark" aria-hidden="true"><svg viewBox="0 0 28 28" fill="none"><path d="M4 5.5h7a5 5 0 0 1 3 1.2 5 5 0 0 1 3-1.2h7v17h-7a5 5 0 0 0-3 1.2 5 5 0 0 0-3-1.2H4zM14 7v16" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg></span>
-          <div><p class="app-name">canvas-helper</p><h1>课程总览</h1></div>
-        </div>
-        <p class="app-description">了解课程，再开始新学期。</p>
+    <main class="workspace">
+      <header id="appToolbar" class="toolbar">
+        <a class="brand" href="#courseList" aria-label="canvas-helper，跳到课程列表"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none"><path d="M4 4h6a3 3 0 0 1 2 1 3 3 0 0 1 2-1h6v16h-6a3 3 0 0 0-2 1 3 3 0 0 0-2-1H4zM12 5v16" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>canvas-helper</a>
+        <label class="term-field"><span class="sr-only">查看学期</span><select id="termSelect" disabled><option value="">正在读取课程…</option></select></label>
+        <label class="search-field"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none"><circle cx="10.5" cy="10.5" r="6.5" stroke="currentColor" stroke-width="1.7"/><path d="m16 16 4 4" stroke="currentColor" stroke-width="1.7"/></svg><span class="sr-only">搜索课程名称或编号</span><input id="courseSearch" type="search" placeholder="搜索课程名称或编号" autocomplete="off"></label>
+        <button id="refreshBtn" type="button" class="button secondary" disabled>刷新</button>
+        <button id="stopBtn" type="button" class="button quiet" hidden>停止</button>
       </header>
-
-      <section class="overview-controls" aria-label="学期与读取进度">
-        <div class="overview-toolbar">
-          <label class="term-field" for="termSelect"><span>查看学期</span><select id="termSelect" disabled><option value="">正在读取课程…</option></select></label>
-          <div class="overview-actions"><button id="refreshBtn" type="button" class="button secondary" disabled>重新读取</button><button id="stopBtn" type="button" class="button quiet" disabled>停止</button></div>
-        </div>
-        <p id="scopeNotice" class="scope-notice" hidden></p>
-        <div class="overview-status-row"><p id="status" role="status" aria-live="polite">正在连接 Canvas…</p><span id="courseCount">0 门课程</span></div>
-        <label class="sr-only" for="progress">课程整理进度</label><progress id="progress" max="100" value="0">0%</progress>
-      </section>
-
-      <div class="overview-layout">
-        <nav id="courseDirectory" class="course-directory" aria-label="选择课程" data-open="false">
-          <div class="directory-heading"><h2>我的课程</h2><span id="directoryCount">0</span></div>
-          <button id="directoryToggle" class="directory-toggle" type="button" aria-expanded="false" aria-controls="courseList"><span>选择课程</span><strong id="selectedCourseLabel">正在读取…</strong><span class="directory-chevron" aria-hidden="true">⌄</span></button>
-          <ul id="courseList" class="directory-items"></ul>
-          <p class="directory-note">滚动查看全部课程，选择后阅读完整介绍。</p>
-        </nav>
-
-        <div class="reading-column">
-          <article id="courseReader" class="course-reader" aria-labelledby="readerTitle" tabindex="-1" hidden>
-            <header class="reader-header">
-              <div class="reader-meta"><span id="readerCode"></span><span id="readerTerm"></span></div>
-              <h2 id="readerTitle" tabindex="-1"></h2>
-              <div class="reader-tools"><span id="readerVideo" class="video-badge"></span><div id="readerLinks" class="reader-links"></div></div>
-              <p id="readerVideoMessage" class="video-message" hidden></p>
-            </header>
-            <section class="reader-body" aria-labelledby="introHeading">
-              <div class="intro-heading"><h3 id="introHeading">课程介绍</h3><a id="readerSource" class="intro-source" target="_blank" rel="noopener noreferrer" hidden>查看原文</a></div>
-              <div id="readerDescription" class="course-description"></div>
-            </section>
-            <footer class="reader-footer"><button id="prevCourseBtn" class="button secondary" type="button">上一门</button><span id="readerPosition"></span><button id="nextCourseBtn" class="button secondary" type="button">下一门</button></footer>
-          </article>
-          <section id="emptyState" class="empty-state" aria-labelledby="emptyTitle"><h2 id="emptyTitle">正在读取课程列表</h2><p id="emptyText">课程介绍和视频状态会显示在这里。</p></section>
-        </div>
+      <div id="overviewLayout" class="overview-layout" data-reading="false">
+        <section id="listColumn" class="list-column" aria-labelledby="listHeading">
+          <div class="list-heading"><h1 id="listHeading">我的课程 <span id="courseCount">0 门</span></h1><p id="status" role="status" aria-live="polite">正在连接 Canvas…</p></div>
+          <p id="scopeNotice" class="scope-notice" hidden></p>
+          <label class="sr-only" for="progress">课程整理进度</label><progress id="progress" max="100" value="0">0%</progress>
+          <div id="listLabels" class="list-labels" aria-hidden="true"><span>课程名称</span><span>Panopto 视频</span><span>快捷入口</span></div>
+          <ul id="courseList" class="course-list" aria-label="课程列表" tabindex="-1"></ul>
+          <section id="emptyState" class="empty-state"><h2 id="emptyTitle">正在读取课程列表</h2><p id="emptyText">课程介绍和视频状态会显示在这里。</p><button id="clearSearchBtn" class="button secondary" type="button" hidden>清空搜索</button></section>
+          <p class="list-note">点击课程名称查看完整介绍。读取期间请保持 Canvas Dashboard 打开。</p>
+        </section>
+        <aside id="courseReader" class="course-reader" aria-labelledby="readerTitle" tabindex="-1" hidden>
+          <div class="reader-navigation">
+            <button id="closeReaderBtn" class="button quiet" type="button"><span aria-hidden="true">←</span> 返回课程</button>
+            <div class="reader-pagination"><span id="readerPosition"></span><button id="prevCourseBtn" class="button icon-button" type="button" aria-label="上一门课程">‹</button><button id="nextCourseBtn" class="button icon-button" type="button" aria-label="下一门课程">›</button></div>
+          </div>
+          <header class="reader-header">
+            <div class="reader-meta"><span id="readerCode"></span><span id="readerTerm"></span></div>
+            <h2 id="readerTitle" tabindex="-1"></h2>
+            <div class="reader-tools"><span id="readerVideo" class="video-badge"></span><div id="readerLinks" class="reader-links"></div></div>
+            <p id="readerVideoMessage" class="video-message" hidden></p>
+            <button id="readerRetryBtn" class="button secondary retry-button" type="button" hidden>重试这门课程</button>
+          </header>
+          <section class="reader-body" aria-labelledby="introHeading">
+            <div class="intro-heading"><h3 id="introHeading">课程介绍</h3><a id="readerSource" target="_blank" rel="noopener noreferrer" hidden>查看原文</a></div>
+            <div id="readerDescription" class="course-description"></div>
+          </section>
+        </aside>
       </div>
-      <footer class="app-footer">介绍来自 Canvas 课程首页或大纲。读取期间请保持 Dashboard 打开。</footer>
     </main>
   </body>
 </html>

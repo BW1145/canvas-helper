@@ -38,7 +38,7 @@ async function readVideo(link, signal) {
   const target = `${link.origin}/Panopto/api/v1/${path}`;
   const response = await fetch(target, {method: "GET", credentials: "include", cache: "no-store", redirect: "manual",
     headers: {Accept: "application/json"}, signal});
-  if (response.status === 429) throw problem("RATE_LIMIT", "请求过多，请稍后重新读取。");
+  if (response.status === 429) throw problem("RATE_LIMIT", "请求过多，请稍后刷新。");
   if (response.status === 401 || response.status === 403 || response.type === "opaqueredirect" ||
       (response.status >= 300 && response.status < 400) || /text\/html/i.test(response.headers.get("content-type") || "")) return pending(link);
   if (!response.ok || (response.url && new URL(response.url).origin !== link.origin)) return pending(link, "已找到视频入口，后台暂未读到列表；可打开视频列表查看。");
@@ -56,7 +56,7 @@ async function readVideo(link, signal) {
 async function runProbe(course, {signal, resolveTool, onStatus}) {
   const supplied = Array.isArray(course.panoptoLinks) ? course.panoptoLinks : [];
   if (!supplied.length) return {status: course.navigationState === "ready" ? "not_found" : "error", count: null, url: null,
-    message: course.navigationState === "ready" ? "课程首页和导航中未发现 Panopto 入口。" : "未能读取课程的视频入口，请重新读取。"};
+    message: course.navigationState === "ready" ? "课程首页和导航中未发现 Panopto 入口。" : "未能读取课程的视频入口，请刷新。"};
   const links = [...new Map(supplied.map(item => allowedLink(course, item?.url)).filter(Boolean).map(item => [item.url, item])).values()];
   if (!links.length) return {status: "error", count: null, url: null, message: "课程视频入口地址无法识别。"};
   let unresolved = supplied.some(item => !allowedLink(course, item?.url)) || course.navigationState !== "ready", empty = null;
