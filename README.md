@@ -1,9 +1,13 @@
 # canvas-helper
 
-用于 Microsoft Edge 的 Canvas 课程总览与 Panopto 批量下载扩展，当前版本 **v0.5.1**。
+用于 Microsoft Edge 的 Canvas 课程总览、Modules 资料下载与 Panopto 批量下载扩展，当前版本 **v0.6.0**。
 
 ## 功能
 
+- 从课程总览进入「课程资料」，按 Modules 章节勾选 PDF、PPT/PPTX、DOC/DOCX，打包为一个 ZIP。
+- 识别章节直接文件和 Canvas 内容页面中的附件；支持章节与文件搜索、类型筛选、当前显示文件全选、已选文件查看及单项读取重试。
+- ZIP 按章节顺序建目录，保留文件名并处理同名文件；附带资料清单，可选附带按章分组的外部链接 HTML。
+- 资料流式写入；停止后保存已完成内容，在资料页保持打开期间可继续或重试失败文件。
 - 在 Canvas Dashboard 点击扩展，按学期浏览课程清单，通过名称或编号搜索课程，直接进入课程主页或视频列表。
 - 点击课程名称打开完整介绍：宽屏使用右侧阅读面板，窄屏使用独立详情视图；提供返回、上一门和下一门操作。
 - 介绍保留教师原文的标题、段落、列表和文字强调；首页没有介绍时尝试读取课程大纲。
@@ -29,7 +33,15 @@
 
 “有视频”和“暂无视频”来自列表接口的实际结果。学校要求交互式进入视频入口、重新登录，或暂未提供可后台读取的列表时，显示“已找到入口”，由你点击“视频列表”进入查看。课程日期不足时，范围明确显示为“Dashboard 上的课程”，也可手动选择具体学期。
 
-**批量下载：** 打开课程的 Panopto 视频列表，点击扩展图标，再点「一键扫描并下载」。如需挑选讲座，先点「只扫描列表」，在网格中选择后点「下载选中」。
+**Modules 资料：** 在课程总览点击对应课程的「课程资料」。按章节或单个文件勾选；搜索与类型筛选组合使用，「显示的文件全选」只选择当前筛选结果，切换筛选保留已选项。点击底部已选数量可查看全部已选文件。
+
+点击「下载所选」，按浏览器提示授权实际文件下载站点；首次授权后再次点击下载，选择一次 ZIP 保存位置。文件按章节顺序写入 ZIP，资料清单记录成功、失败与来源。相同文件在同一章合并，不同章节各自保留副本；同名的不同文件自动加编号。
+
+点击「停止下载」保存已经完成的文件；保持资料页打开，可用「继续 / 重试失败」更新同一个包，并跳过已完成文件。「新建下载包」按当前选择另建任务。刷新资料不会改变当前下载任务的文件集合。
+
+外部链接按章节和来源页面列出，可预览或单独导出 HTML，也可随 ZIP 附带。外链清单范围为本课程本次扫描发现的全部外部链接。章节、页面和文件的访问状态均沿用 Canvas 当前账号。
+
+**Panopto 批量下载：** 打开课程的 Panopto 视频列表，点击扩展图标，再点「一键扫描并下载」。如需挑选讲座，先点「只扫描列表」，在网格中选择后点「下载选中」。
 
 勾选「同时下载视频」时，先选择一次 ZIP 保存位置；仅下载转录稿时，完成后保存 ZIP。下载期间保持课程页和工作台打开。视频与对应 TXT 使用相同文件名前缀，结果和失败原因记录在清单中。无字幕讲座仍会尝试下载视频，具体取决于站点提供的下载能力。
 
@@ -38,6 +50,8 @@
 ## 权限与本地文件
 
 扩展沿用当前浏览器的登录状态，通过 `activeTab` 读取用户主动打开的 Canvas 页面，并使用 Panopto 站点权限扫描与下载。实际下载站点需要额外权限时，重试会请求该站点的读取授权。
+
+资料下载从已发现的 Canvas 文件信息取得下载地址，请求对应站点读取授权。原始下载地址只保留在当前任务内；导出的资料清单使用 Canvas 来源页面，外链清单过滤常见认证参数。
 
 账号凭据、浏览器会话、课程视频、转录稿及诊断信息应保存在本地；`.gitignore` 已列出常用排除规则。提交新文件前请检查暂存清单。
 
@@ -51,9 +65,11 @@ npm test
 
 测试覆盖课程与学期读取、Panopto 状态检测、讲座收集、网格选择、转录稿转换、统一 ZIP、视频传输、停止及重试。自动化测试使用模拟浏览器、网络和文件句柄；学校账号下的课程总览实机验证另行进行。版本附带的验证记录见 `VERIFICATION.txt`，详细操作见 `README.zh-CN.txt`。
 
+资料测试覆盖 Modules 分页、页面附件、文件选择与重名处理、外链导出、实际 ZIP 字节及 CRC、停止、重试、保存失败恢复、传输格式和权限提示。可运行 `node materials.browser.test.cjs` 在独立浏览器与模拟课程中验证完整界面和 ZIP 流程，环境变量与总览浏览器测试相同。
+
 安装 Playwright 及其 Chromium 后，可运行 `node courses.browser.test.cjs` 检查真实浏览器中的搜索、单门重试、结构化全文、学期筛选、停止、键盘焦点及 320–1920 像素布局。可用环境变量 `CANVAS_HELPER_BROWSER_CHANNEL=msedge` 选择本机 Edge；测试使用独立浏览器和模拟课程数据。
 
-接口依据：[Canvas 课程与选课状态](https://developerdocs.instructure.com/services/canvas/resources/courses)、[Panopto REST API](https://demo.hosted.panopto.com/Panopto/api/docs/index.html)。
+接口依据：[Canvas 课程与选课状态](https://developerdocs.instructure.com/services/canvas/resources/courses)、[Modules](https://developerdocs.instructure.com/services/canvas/resources/modules)、[Files](https://developerdocs.instructure.com/services/canvas/resources/files)、[Pages](https://developerdocs.instructure.com/services/canvas/resources/pages)、[Panopto REST API](https://demo.hosted.panopto.com/Panopto/api/docs/index.html)。
 
 ## 许可证
 

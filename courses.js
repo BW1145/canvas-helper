@@ -185,6 +185,11 @@ function courseActions(course, record, prefix = "") {
   const entrance = safeLink(record?.video?.url || record?.detail?.panoptoLinks?.[0]?.url, course, true);
   const actions = [];
   if (home) actions.push(link("课程主页", home, "course-home-link", id, prefix + "home"));
+  if (home && state.sourceTabId !== null) {
+    const url = new URL("materials.html", location.href);
+    url.search = new URLSearchParams({sourceTab: String(state.sourceTabId), course: id}).toString();
+    actions.push(link("课程资料", url.href, "materials-link", id, prefix + "materials"));
+  }
   if (entrance) actions.push(link("视频列表", entrance, "video-link", id, prefix + "video"));
   return actions;
 }

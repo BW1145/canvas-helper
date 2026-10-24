@@ -38,7 +38,7 @@ function harness(options = {}) {
   document.createElement = element;
   document.createTextNode = text => {const node = element("#text"); node.textContent = text; return node;};
   document.createDocumentFragment = () => element("#fragment");
-  const context = {document, URL, AbortController, DOMException,
+  const context = {document, URL, URLSearchParams, AbortController, DOMException,
     location: {href: `chrome-extension://fixture/courses.html${options.noSource ? "" : "?sourceTab=42"}`},
     window: {matchMedia() {return {matches: Boolean(options.narrow), addEventListener() {}};}, addEventListener(type, handler) {windowEvents[type] = handler;}},
     chrome: {scripting: {async executeScript(request) {

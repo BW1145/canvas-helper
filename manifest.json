@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "canvas-helper",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "icons": {"16": "icons/icon-16.png", "32": "icons/icon-32.png", "48": "icons/icon-48.png", "128": "icons/icon-128.png"},
-  "description": "在 Canvas Dashboard 查看学期课程介绍与 Panopto 视频状态；在课程视频页批量保存转录稿和可选视频。",
+  "description": "查看 Canvas 课程与 Panopto 视频状态，按 Modules 章节打包下载 PDF、PPT、Word 资料，并批量保存讲座转录稿和可选视频。",
   "minimum_chrome_version": "119",
   "permissions": ["activeTab", "scripting", "downloads", "webRequest"],
   "host_permissions": ["https://*.panopto.com/*", "https://*.panopto.eu/*"],
