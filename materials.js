@@ -10,7 +10,9 @@ const call = createMaterialsSource(sourceTab);
 const state = {course: null, chapters: [], selected: new Set(), collapsed: new Set(), query: "", kind: "", selectedOnly: false,
   scanning: false, downloading: false, scanController: null, downloadController: null, archive: null, linksOpen: false, objectUrls: new Set(), lastProgress: 0};
 const status = text => {$("status").textContent = text;};
+const downloadStatus = text => {$("downloadNotice").textContent = text; $("downloadNotice").hidden = !text;};
 const allLinks = () => state.chapters.flatMap(chapter => chapter.links || []);
+const scanIncomplete = () => state.scanning || state.chapters.some(chapter => !chapter.ready || chapter.issues?.length);
 function formatSize(bytes) {
   if (!Number.isFinite(bytes)) return "大小未知";
   if (bytes < 1024) return `${bytes} B`;
@@ -45,10 +47,11 @@ function render() {
   $("typeFilter").disabled = state.selectedOnly;
   $("clearBtn").disabled = state.downloading || !state.selected.size;
   $("includeLinks").disabled = state.downloading;
-  $("downloadBtn").disabled = state.scanning || state.downloading || !state.selected.size;
+  $("downloadBtn").disabled = state.downloading || !state.selected.size;
   $("downloadBtn").textContent = state.archive ? "新建下载包" : "下载所选";
   $("stopBtn").hidden = !state.downloading;
   $("downloadBtn").hidden = state.downloading;
+  $("includeLinksLabel").textContent = scanIncomplete() ? "附带已读取的外部链接清单" : "附带本课程的外部链接清单";
   $("selectedBtn").textContent = state.selectedOnly ? `返回全部 · 已选 ${state.selected.size} 个文件` : `已选 ${state.selected.size} 个文件`;
   const chosen = rowsOf(state.chapters).filter(row => state.selected.has(row.key));
   const bytes = chosen.reduce((sum,row) => sum + (row.size || 0),0);
@@ -104,7 +107,8 @@ function render() {
   }
 }
 function renderLinks() {
-  const links = allLinks(); $("linkCount").textContent = `${links.length} 条`; $("exportLinksBtn").disabled = !state.course || state.scanning || state.downloading;
+  const links = allLinks(); $("linkCount").textContent = `${links.length} 条`; $("exportLinksBtn").disabled = !state.course || state.downloading;
+  $("exportLinksBtn").textContent = scanIncomplete() ? "导出已读取链接" : "导出链接清单";
   $("linksToggle").setAttribute("aria-expanded", String(state.linksOpen)); $("linksToggle").textContent = state.linksOpen ? "收起清单" : "查看清单";
   $("externalList").hidden = !state.linksOpen;
   if (!state.linksOpen) return;
@@ -122,7 +126,7 @@ function renderLinks() {
 function renderDownload(row, bytes) {
   const archive = state.archive; $("archivePanel").hidden = !archive;
   $("retryBtn").hidden = !archive || state.downloading || !archive.rows.some(r => r.status !== "success") && archive.saved;
-  $("retryBtn").disabled = state.scanning;
+  $("retryBtn").disabled = state.downloading;
   if (!archive) return;
   const count = archive.rows.filter(r => r.status === "success").length, failed = archive.rows.filter(r => r.status === "error").length;
   $("downloadProgress").value = archive.rows.length ? Math.round(count / archive.rows.length * 100) : 0;
@@ -145,7 +149,7 @@ async function scan() {
     for (let index = 0; index < state.chapters.length; index++) {
       if (signal.aborted) break;
       status(`正在读取章节 ${index + 1} / ${state.chapters.length}：${state.chapters[index].name}`);
-      state.chapters[index] = await readChapter(state.chapters[index],courseId,call,signal,cache); render();
+      state.chapters[index] = await readChapter(state.chapters[index],courseId,call,signal,cache,partial => {state.chapters[index] = partial; render();}); render();
     }
     status(signal.aborted ? "已停止扫描，可刷新或单独重试未完成章节。" : `已整理 ${state.chapters.length} 个章节，${rowsOf(state.chapters).length} 个文件，${allLinks().length} 条外部链接。`);
   } catch(cause) {status(cause.name === "AbortError" ? "已停止扫描，已读取资料保留在本页。" : cause.message);}
@@ -155,7 +159,7 @@ async function scanChapter(id) {
   if (state.scanning || state.downloading) return;
   const index = state.chapters.findIndex(c => c.id === id); if (index < 0) return;
   state.scanning = true; state.scanController = new AbortController(); render();
-  try {state.chapters[index] = await readChapter(state.chapters[index],courseId,call,state.scanController.signal); status("章节资料已更新。");}
+  try {state.chapters[index] = await readChapter(state.chapters[index],courseId,call,state.scanController.signal,new Map(),partial => {state.chapters[index] = partial; render();}); status("章节资料已更新。");}
   catch(cause) {status(cause.name === "AbortError" ? "已停止扫描。" : cause.message);}
   finally {state.scanning = false; state.scanController = null; render();}
 }
@@ -171,21 +175,23 @@ async function retryFile(row) {
   finally {state.scanning = false; state.scanController = null; render();}
 }
 async function download(retry = false) {
-  if (state.downloading || state.scanning) return;
+  if (state.downloading) return;
   const rows = retry ? state.archive?.rows.filter(row => row.status !== "success") || [] : archiveRows(state.chapters,state.selected);
   if (!retry && !rows.length) return;
+  const course = {...state.course, scanIncomplete: scanIncomplete()}, links = allLinks(), includeLinks = $("includeLinks").checked;
+  downloadStatus("");
   state.downloading = true; render();
   try {
     const origins = downloadOrigins(rows);
     if (origins.length && !await chrome.permissions.contains({origins})) {
       const granted = await chrome.permissions.request({origins});
-      status(granted ? "下载站点已授权，请再次点击下载按钮选择保存位置并开始。" : "下载站点授权未完成，可稍后重试。");
+      downloadStatus(granted ? "下载站点已授权，请再次点击下载按钮选择保存位置并开始。" : "下载站点授权未完成，可稍后重试。");
       return;
     }
     if (!retry) {
       if (typeof window.showSaveFilePicker !== "function") throw new Error("请在桌面 Edge 中打开课程资料并选择 ZIP 保存位置。");
       const handle = await window.showSaveFilePicker({suggestedName: `${safeFilename(state.course.code || state.course.name)} - 课程资料.zip`, types:[{description:"ZIP 压缩包",accept:{"application/zip":[".zip"]}}]});
-      state.archive = new MaterialsArchive(handle,state.course,rows,allLinks(),$("includeLinks").checked);
+      state.archive = new MaterialsArchive(handle,course,rows,links,includeLinks);
     }
     if (!state.archive) return;
     state.downloadController = new AbortController(); render();
@@ -193,15 +199,15 @@ async function download(retry = false) {
       const now = Date.now(); if (bytes && now - state.lastProgress < 250) return;
       state.lastProgress = now; renderDownload(row,bytes);
     }});
-    status(state.downloadController.signal.aborted ? "已停止下载，已完成文件和清单已保存，可继续下载。" : "下载任务已保存，可在下方查看结果。");
-  } catch(cause) {status(cause.name === "AbortError" ? "已取消保存位置选择。" : cause.code ? cause.message : "下载包保存未完成，请检查保存位置后重试。");}
+    downloadStatus(state.downloadController.signal.aborted ? "已停止下载，已完成文件和清单已保存，可继续下载。" : "下载任务已保存，可在下方查看结果。");
+  } catch(cause) {downloadStatus(cause.name === "AbortError" ? "已取消保存位置选择。" : cause.code ? cause.message : "下载包保存未完成，请检查保存位置后重试。");}
   finally {state.downloading = false; state.downloadController = null; render();}
 }
 async function exportLinks() {
   if (!state.course) return;
-  const url = URL.createObjectURL(new Blob([externalHtml(state.course,allLinks())],{type:"text/html;charset=utf-8"})); state.objectUrls.add(url);
-  try {await chrome.downloads.download({url,filename:`${safeFilename(state.course.code || state.course.name)} - 外部链接.html`,saveAs:true,conflictAction:"uniquify"}); status("链接清单已提交给 Edge 保存。");}
-  catch {URL.revokeObjectURL(url); state.objectUrls.delete(url); status("链接清单保存已取消，可再次导出。");}
+  const url = URL.createObjectURL(new Blob([externalHtml({...state.course,scanIncomplete:scanIncomplete()},allLinks())],{type:"text/html;charset=utf-8"})); state.objectUrls.add(url);
+  try {await chrome.downloads.download({url,filename:`${safeFilename(state.course.code || state.course.name)} - 外部链接.html`,saveAs:true,conflictAction:"uniquify"}); downloadStatus("链接清单已提交给 Edge 保存。");}
+  catch {URL.revokeObjectURL(url); state.objectUrls.delete(url); downloadStatus("链接清单保存已取消，可再次导出。");}
 }
 $("backLink").href = `courses.html?${new URLSearchParams({sourceTab:String(sourceTab ?? "")})}`;
 $("scanBtn").addEventListener("click",() => {void scan();});

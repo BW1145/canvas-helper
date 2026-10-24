@@ -73,6 +73,21 @@ test("failed pages and file metadata leave retryable rows and chapter issues",as
   assert.equal(chapter.rows[0].error,"读取失败"); assert.equal(chapter.issues.length,1);
   const lock = await readChapter({id:"2",locked:true},"12",() => assert.fail("locked module must not be read")); assert.equal(lock.rows.length,0);
 });
+test("chapter progress publishes selectable files before later metadata completes",async () => {
+  let release,firstReady;
+  const first=new Promise(resolve=>{firstReady=resolve;});
+  const task=readChapter({id:"1",name:"Week 1"},"12",async(method,args)=>{
+    if(method==="moduleItems")return {items:[{kind:"file",id:"10",title:"First.pdf",source:"first"},{kind:"file",id:"11",title:"Later.pdf",source:"later"}]};
+    if(args[1]==="11")await new Promise(resolve=>{release=resolve;});
+    return {name:args[1]+".pdf",size:12,url:origin+"/files/"+args[1]+"/download",locked:false};
+  },new AbortController().signal,new Map(),partial=>{if(partial.rows.length===1)firstReady(partial);});
+  const partial=await first;assert.equal(partial.ready,false);assert.equal(partial.rows.length,1);
+  const selected=new Set();selectRows(selected,partial.rows,true);assert.equal(selected.size,1);
+  const snapshot=archiveRows([partial],selected);partial.rows[0].sources.push({title:"Later source",url:"later"});
+  assert.equal(snapshot[0].sources.length,1);
+  await new Promise(resolve=>setImmediate(resolve));release();
+  const complete=await task;assert.equal(complete.rows.length,2);assert.equal(snapshot.length,1);
+});
 test("visible selection excludes locked/error files and search includes chapter and page names",() => {
   const rows = [row(1),row(2,"Notes.docx"),row(3,"Locked.pdf",{locked:true}),row(4,"Error.pdf",{error:"failed"})], selected = new Set();
   const filtered = rows.filter(r => matching({name:"第一章"},r,"第一章","PDF")); selectRows(selected,filtered,true);

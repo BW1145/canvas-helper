@@ -13,19 +13,20 @@ export function matching(chapter, row, query, kind) {
 export function selectRows(selected, rows, checked) {
   for (const row of rows.filter(selectable)) checked ? selected.add(row.key) : selected.delete(row.key);
 }
-export async function readChapter(chapter, courseId, call, signal, fileCache = new Map()) {
+export async function readChapter(chapter, courseId, call, signal, fileCache = new Map(), onUpdate = () => {}) {
   const result = {...chapter, rows: [], links: [], issues: [], ready: false};
   if (chapter.locked) return {...result, ready: true};
   const files = new Map(), links = new Map();
+  const publish = () => {result.rows = [...files.values()]; result.links = [...links.values()]; onUpdate({...result});};
   const running = () => {if (signal?.aborted) throw new DOMException("已停止扫描。", "AbortError");};
   const pause = cause => {if (cause.name === "AbortError" || ["AUTH_REQUIRED", "RATE_LIMIT", "CATALOG_REQUIRED"].includes(cause.code)) throw cause;};
   const addLink = (ref, source) => {
     const key = `${ref.url}|${source.url}`;
-    if (!links.has(key)) links.set(key, {title: ref.title, url: ref.url, source: source.url, sourceTitle: source.title, chapter: chapter.name, moduleId: chapter.id});
+    if (!links.has(key)) {links.set(key, {title: ref.title, url: ref.url, source: source.url, sourceTitle: source.title, chapter: chapter.name, moduleId: chapter.id}); publish();}
   };
   async function addFile(ref, source) {
     running();
-    if (files.has(ref.id)) {const row = files.get(ref.id); if (!row.sources.some(s => s.url === source.url)) row.sources.push(source); return;}
+    if (files.has(ref.id)) {const row = files.get(ref.id); if (!row.sources.some(s => s.url === source.url)) {row.sources.push(source); publish();} return;}
     const row = {key: `${chapter.id}:${ref.id}`, id: ref.id, moduleId: chapter.id, chapter: chapter.name, name: ref.title, kind: fileKind(ref.title), size: null,
       sources: [source], locked: Boolean(ref.locked), error: "", url: null, message: ref.message || ""};
     if (!row.locked) {
@@ -37,7 +38,7 @@ export async function readChapter(chapter, courseId, call, signal, fileCache = n
         if (!row.url && !row.locked) row.error = "文件尚未提供下载地址，请重试。";
       } catch(cause) {pause(cause); row.error = cause.message;}
     }
-    files.set(ref.id, row);
+    files.set(ref.id, row); publish();
   }
   try {
     const data = await call("moduleItems", [courseId, chapter.id], signal);
@@ -53,7 +54,7 @@ export async function readChapter(chapter, courseId, call, signal, fileCache = n
             if (ref.kind === "file") await addFile(ref, source);
             else if (ref.kind === "external") addLink(ref, source);
           }
-        } catch(cause) {pause(cause); result.issues.push({title: item.title, message: cause.message});}
+        } catch(cause) {pause(cause); result.issues.push({title: item.title, message: cause.message}); publish();}
       } else if (item.kind === "page" && item.locked) result.issues.push({title: item.title, message: item.message});
     }
     result.ready = true;
@@ -78,7 +79,7 @@ export function archiveRows(chapters, selected) {
       let name = stem + ext, n = 2;
       while (used.has(name.toLocaleLowerCase())) name = `${stem} (${n++})${ext}`;
       used.add(name.toLocaleLowerCase());
-      result.push({...row, filename: `${folder}/${name}`, status: "pending", error: "", permissionOrigin: null});
+      result.push({...row, sources: row.sources.map(source => ({...source})), filename: `${folder}/${name}`, status: "pending", error: "", permissionOrigin: null});
     }
   });
   return result;
@@ -100,7 +101,7 @@ export function externalHtml(course, links) {
     if (!groups.has(link.moduleId)) groups.set(link.moduleId, {name: link.chapter, rows: []});
     groups.get(link.moduleId).rows.push(`<li><a href="${escape(url)}" target="_blank" rel="noopener noreferrer">${escape(link.title)}</a><p>${escape(url)}</p><p>来源：<a href="${escape(publicLink(link.source))}" target="_blank" rel="noopener noreferrer">${escape(link.sourceTitle)}</a></p></li>`);
   }
-  return `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escape(course.name)} · 外部链接</title><style>body{max-width:900px;margin:40px auto;padding:0 20px;font:16px/1.7 system-ui;color:#202a30}a{color:#17634f;overflow-wrap:anywhere}p{color:#5e6b73;overflow-wrap:anywhere;margin:4px 0}li{margin-bottom:24px}h2{margin-top:32px}</style><h1>${escape(course.name)} · 外部链接</h1><p>按课程章节整理的链接清单</p>${[...groups.values()].map(g => `<section><h2>${escape(g.name)}</h2><ul>${g.rows.join("")}</ul></section>`).join("") || "<p>本次扫描未发现外部链接。</p>"}</html>`;
+  return `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escape(course.name)} · 外部链接</title><style>body{max-width:900px;margin:40px auto;padding:0 20px;font:16px/1.7 system-ui;color:#202a30}a{color:#17634f;overflow-wrap:anywhere}p{color:#5e6b73;overflow-wrap:anywhere;margin:4px 0}li{margin-bottom:24px}h2{margin-top:32px}</style><h1>${escape(course.name)} · 外部链接</h1><p>${course.scanIncomplete ? "清单包含导出或开始下载时已读取到的链接；当时的资料扫描尚未完成。" : "按课程章节整理的链接清单"}</p>${[...groups.values()].map(g => `<section><h2>${escape(g.name)}</h2><ul>${g.rows.join("")}</ul></section>`).join("") || "<p>本次扫描未发现外部链接。</p>"}</html>`;
 }
 export function checklist(rows) {
   const labels = {pending: "未完成", working: "未完成", success: "已保存", error: "失败"};

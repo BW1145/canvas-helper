@@ -10,6 +10,7 @@
   <main class="materials-workspace">
     <header class="materials-header"><div><a id="backLink" class="back-link">返回课程总览</a><h1 id="courseTitle">课程资料</h1><p id="courseSubtitle">按章节选择 PDF、PPT 和 Word 文件</p></div><div class="header-actions"><button id="scanBtn" class="button secondary" type="button">刷新资料</button><button id="scanStopBtn" class="button quiet" type="button" hidden>停止扫描</button></div></header>
     <p id="status" class="materials-status" role="status" aria-live="polite">正在连接 Canvas…</p>
+    <p id="downloadNotice" class="materials-status" role="status" aria-live="polite" hidden></p>
     <section class="file-filters" aria-label="查找课程资料"><label class="file-search"><span class="sr-only">搜索文件或章节</span><input id="searchInput" type="search" placeholder="搜索文件或章节…" autocomplete="off"></label><label class="type-field">类型<select id="typeFilter"><option value="">全部</option><option value="PDF">PDF</option><option value="PPT">PPT</option><option value="Word">Word</option></select></label></section>
     <div class="selection-tools"><label><input id="selectAll" type="checkbox"> <span id="selectAllLabel">显示的文件全选</span></label><div><button id="expandBtn" class="text-button" type="button">全部展开</button><button id="collapseBtn" class="text-button" type="button">全部收起</button></div></div>
     <div id="chapterList"></div>
@@ -18,6 +19,6 @@
     <section id="archivePanel" class="archive-panel" hidden aria-labelledby="archiveHeading"><h2 id="archiveHeading">下载任务</h2><p id="archiveStatus" role="status" aria-live="polite"></p><progress id="downloadProgress" value="0" max="100" aria-label="文件下载进度"></progress><ul id="downloadResults"></ul><p class="session-note">保留本页可继续下载或重试失败文件。</p></section>
     <p class="materials-note">资料来自本课程的 Modules 及其 Canvas 内容页面。读取期间请保持原 Canvas 标签页打开。</p>
   </main>
-  <footer class="download-bar"><div class="download-bar-inner"><div class="selection-summary"><button id="selectedBtn" class="text-button" type="button">已选 0 个文件</button><span id="selectedSize"></span><label><input id="includeLinks" type="checkbox" checked> 附带本课程的外部链接清单</label></div><div class="download-actions"><button id="clearBtn" class="button quiet" type="button">清空选择</button><button id="retryBtn" class="button secondary" type="button" hidden>继续 / 重试失败</button><button id="downloadBtn" class="button primary" type="button" disabled>下载所选</button><button id="stopBtn" class="button secondary" type="button" hidden>停止下载</button></div></div></footer>
+  <footer class="download-bar"><div class="download-bar-inner"><div class="selection-summary"><button id="selectedBtn" class="text-button" type="button">已选 0 个文件</button><span id="selectedSize"></span><label><input id="includeLinks" type="checkbox" checked> <span id="includeLinksLabel">附带本课程的外部链接清单</span></label></div><div class="download-actions"><button id="clearBtn" class="button quiet" type="button">清空选择</button><button id="retryBtn" class="button secondary" type="button" hidden>继续 / 重试失败</button><button id="downloadBtn" class="button primary" type="button" disabled>下载所选</button><button id="stopBtn" class="button secondary" type="button" hidden>停止下载</button></div></div></footer>
 </body>
 </html>

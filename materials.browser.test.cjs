@@ -8,7 +8,7 @@ const item = (id,type,extra={}) => ({id:String(id),type,title:names[id] || "Read
 (async()=>{
   const browser=await chromium.launch({headless:true,channel:process.env.CANVAS_HELPER_BROWSER_CHANNEL});
   const page=await browser.newPage({viewport:{width:1440,height:1000}}), requests=[],errors=[];
-  let metadataFailure=true,downloadFailure=true;
+  let metadataFailure=true,downloadFailure=true,pauseFile=false,releaseFile,pauseDownload=false,releaseDownload;
   page.on("pageerror",e=>errors.push(e.message));
   await page.addInitScript(({source})=>{
     const file={name:"fixture-materials.zip",data:new Uint8Array()};
@@ -33,6 +33,7 @@ const item = (id,type,extra={}) => ({id:String(id),type,title:names[id] || "Read
     const url=new URL(route.request().url());requests.push(url.href);
     if(url.origin===assets){
       const id=url.pathname.split("/").at(-1);
+      if(id==="1"&&pauseDownload)await new Promise(resolve=>{releaseDownload=resolve;});
       if(id==="2"&&downloadFailure)return route.fulfill({status:503,body:"offline"});
       const body=payloads[id] || payloads[1];
       return route.fulfill({contentType:id==="1"||id==="4"?"application/pdf":"application/vnd.openxmlformats-officedocument.wordprocessingml.document",headers:{"content-length":String(body.length)},body});
@@ -44,7 +45,7 @@ const item = (id,type,extra={}) => ({id:String(id),type,title:names[id] || "Read
     if(url.pathname==="/api/v1/courses/12/modules/2/items")return route.fulfill({json:[item(1,"File",{content_id:"1"}),item(4,"File",{content_id:"4"}),item(5,"File",{content_id:"5",content_details:{locked_for_user:true}}),item(6,"File",{content_id:"6"})]});
     if(url.pathname==="/api/v1/courses/12/pages/readings")return route.fulfill({json:{published:true,body:'<p><a href="/courses/12/files/1/download?verifier=private">Outline again</a><a href="/courses/12/files/3?wrap=1">Reading notes</a><a href="https://example.org/reading?auth=fixture-secret">Related reading</a></p><iframe src="https://www.youtube.com/embed/demo" title="Embedded video"></iframe><div hidden><a href="https://hidden.invalid">Hidden</a></div><script>window.open("https://unrelated.invalid")</script>'}});
     const meta=url.pathname.match(/^\/api\/v1\/courses\/12\/files\/(\d+)$/);
-    if(meta){const id=meta[1];if(id==="6"&&metadataFailure)return route.fulfill({status:503,body:"offline"});return route.fulfill({json:{id,filename:names[id],size:(payloads[id]||payloads[1]).length,url:`${assets}/blob/${id}?signature=fixture-secret`,"content-type":"application/octet-stream"}});}
+    if(meta){const id=meta[1];if(id==="2"&&pauseFile)await new Promise(resolve=>{releaseFile=resolve;});if(id==="6"&&metadataFailure)return route.fulfill({status:503,body:"offline"});return route.fulfill({json:{id,filename:names[id],size:(payloads[id]||payloads[1]).length,url:`${assets}/blob/${id}?signature=fixture-secret`,"content-type":"application/octet-stream"}});}
     const name=path.basename(url.pathname);
     if(!/^[\w.-]+\.(?:js|css|html)$/.test(name)||!fs.existsSync(path.join(__dirname,name)))return route.abort();
     return route.fulfill({contentType:name.endsWith("js")?"text/javascript":name.endsWith("css")?"text/css":"text/html",body:fs.readFileSync(path.join(__dirname,name))});
@@ -80,13 +81,13 @@ const item = (id,type,extra={}) => ({id:String(id),type,title:names[id] || "Read
     assert.equal(requests.some(u=>/youtube|example\.org|hidden\.invalid|unrelated\.invalid/.test(u)),false);
     await page.locator("#exportLinksBtn").click();assert.equal(await page.evaluate(()=>fixture.exports.length),1);
     await page.setViewportSize({width:1440,height:1000});
-    await page.locator("#downloadBtn").click();await page.waitForFunction(()=>document.getElementById("status").textContent.startsWith("下载站点已授权"));
+    await page.locator("#downloadBtn").click();await page.waitForFunction(()=>document.getElementById("downloadNotice").textContent.startsWith("下载站点已授权"));
     assert.equal(await page.evaluate(()=>fixture.pickers),0);
     assert.deepEqual(await page.evaluate(()=>fixture.permissions[0].origins),[`${assets}/*`]);
     const beforeCancelled=requests.filter(u=>u.startsWith(assets)).length;
     await page.evaluate(()=>{fixture.cancelPicker=true;});
     await page.locator("#downloadBtn").click();
-    await page.waitForFunction(()=>document.getElementById("status").textContent==="已取消保存位置选择。");
+    await page.waitForFunction(()=>document.getElementById("downloadNotice").textContent==="已取消保存位置选择。");
     assert.equal(requests.filter(u=>u.startsWith(assets)).length,beforeCancelled);
     await page.locator("#downloadBtn").click();await page.waitForFunction(()=>document.getElementById("archiveStatus").textContent.startsWith("fixture-materials.zip 已保存"));
     assert.match(await page.locator("#archiveStatus").textContent(),/5 \/ 6.*1 个失败/);
@@ -96,7 +97,38 @@ const item = (id,type,extra={}) => ({id:String(id),type,title:names[id] || "Read
     const data=Buffer.from(await page.evaluate(()=>Array.from(fixture.file.data))),view=new DataView(data.buffer,data.byteOffset,data.length);
     const zipEnd=Number(view.getBigUint64(data.length-42+8,true));assert.equal(view.getUint32(zipEnd,true),0x06064b50);
     assert.equal(Number(view.getBigUint64(zipEnd+32,true)),8,"six files + one CSV + one link page");
+
+    // Hold the second file's metadata: the first file must be usable before even this chapter finishes.
+    pauseFile=true;await page.reload();
+    await page.locator('[data-focus="file-1:1"]').waitFor();
+    assert.equal(await page.locator(".file-row").count(),1);
+    assert.equal(await page.locator("#scanStopBtn").isVisible(),true);
+    await page.locator('[data-focus="file-1:1"]').check();
+    assert.equal(await page.locator("#downloadBtn").isEnabled(),true);
+    await page.locator("#downloadBtn").click();
+    await page.waitForFunction(()=>document.getElementById("downloadNotice").textContent.startsWith("下载站点已授权"));
+    await page.locator("#downloadBtn").click();
+    await page.waitForFunction(()=>document.getElementById("archiveStatus").textContent.includes("已保存：1 / 1"));
+    assert.equal(await page.locator("#scanStopBtn").isVisible(),true,"download finishes while remaining metadata is pending");
+    assert.equal(await page.locator(".file-row").count(),1);
+
+    // A later scan result must not enlarge a download already selected by the user.
+    pauseDownload=true;await page.locator("#downloadBtn").click();
+    await page.waitForFunction(()=>document.getElementById("stopBtn").hidden===false);
+    await page.waitForFunction(()=>document.getElementById("archiveStatus").textContent.includes("正在下载"));
+    pauseFile=false;releaseFile();
+    await page.waitForFunction(()=>document.getElementById("status").textContent.startsWith("已整理"));
+    assert.equal(await page.locator(".file-row").count(),7);
+    assert.equal(await page.locator("#selectedBtn").textContent(),"已选 1 个文件");
+    assert.match(await page.locator("#archiveStatus").textContent(),/0 \/ 1/);
+    pauseDownload=false;releaseDownload();
+    await page.waitForFunction(()=>document.getElementById("archiveStatus").textContent.includes("已保存：1 / 1"));
+    const early=Buffer.from(await page.evaluate(()=>Array.from(fixture.file.data))),earlyView=new DataView(early.buffer,early.byteOffset,early.length);
+    const earlyEnd=Number(earlyView.getBigUint64(early.length-42+8,true));
+    assert.equal(Number(earlyView.getBigUint64(earlyEnd+32,true)),3,"one chosen file + CSV + current links snapshot");
+    assert.match(early.toString("utf8"),/当时的资料扫描尚未完成/);
+    assert.doesNotMatch(early.toString("utf8"),/youtube\.com/);
     assert.deepEqual(errors,[]);
-    console.log("materials browser: paginated modules, page attachments, selection/filtering, metadata retry, ZIP retry, permission flow, external-list export and 7 viewport widths passed");
+    console.log("materials browser: incremental chapter files, download during scanning, fixed selection snapshots, pagination, retries, permission flow, link export and 7 viewport widths passed");
   }finally{await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});
