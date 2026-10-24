@@ -1,5 +1,5 @@
 import {createMaterialsSource} from "./materials-source.js";
-import {fileKind, rowsOf, selectable, matching, selectRows, readChapter, archiveRows, MaterialsArchive, externalHtml, publicLink} from "./materials-model.js";
+import {fileKind, rowsOf, selectable, matching, selectRows, readChapter, archiveRows, archiveLinks, MaterialsArchive, externalHtml, publicLink} from "./materials-model.js";
 import {fetchMaterialStream, downloadOrigins} from "./materials-transfer.js";
 import {safeFilename} from "./transcript-utils.js";
 
@@ -51,7 +51,7 @@ function render() {
   $("downloadBtn").textContent = state.archive ? "新建下载包" : "下载所选";
   $("stopBtn").hidden = !state.downloading;
   $("downloadBtn").hidden = state.downloading;
-  $("includeLinksLabel").textContent = scanIncomplete() ? "附带已读取的外部链接清单" : "附带本课程的外部链接清单";
+  $("includeLinksLabel").textContent = scanIncomplete() ? "附带所选章节已读取的外部链接" : "附带所选章节的外部链接清单";
   $("selectedBtn").textContent = state.selectedOnly ? `返回全部 · 已选 ${state.selected.size} 个文件` : `已选 ${state.selected.size} 个文件`;
   const chosen = rowsOf(state.chapters).filter(row => state.selected.has(row.key));
   const bytes = chosen.reduce((sum,row) => sum + (row.size || 0),0);
@@ -178,7 +178,7 @@ async function download(retry = false) {
   if (state.downloading) return;
   const rows = retry ? state.archive?.rows.filter(row => row.status !== "success") || [] : archiveRows(state.chapters,state.selected);
   if (!retry && !rows.length) return;
-  const course = {...state.course, scanIncomplete: scanIncomplete()}, links = allLinks(), includeLinks = $("includeLinks").checked;
+  const course = {...state.course, scanIncomplete: scanIncomplete()}, links = archiveLinks(state.chapters,rows), includeLinks = $("includeLinks").checked;
   downloadStatus("");
   state.downloading = true; render();
   try {
@@ -199,7 +199,8 @@ async function download(retry = false) {
       const now = Date.now(); if (bytes && now - state.lastProgress < 250) return;
       state.lastProgress = now; renderDownload(row,bytes);
     }});
-    downloadStatus(state.downloadController.signal.aborted ? "已停止下载，已完成文件和清单已保存，可继续下载。" : "下载任务已保存，可在下方查看结果。");
+    const completed = state.archive.rows.filter(row => row.status === "success").length;
+    downloadStatus(state.downloadController.signal.aborted ? "已停止下载，已完成文件和清单已保存，可继续下载。" : completed === 0 ? `本次下载成功 0 / ${state.archive.rows.length} 个文件。${state.archive.rows.find(row => row.error)?.error || "请查看下载结果。"}可点击“继续 / 重试失败”。` : `已保存 ${completed} / ${state.archive.rows.length} 个文件，可在下方查看结果。`);
   } catch(cause) {downloadStatus(cause.name === "AbortError" ? "已取消保存位置选择。" : cause.code ? cause.message : "下载包保存未完成，请检查保存位置后重试。");}
   finally {state.downloading = false; state.downloadController = null; render();}
 }

@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  const VERSION = "0.6.0";
+  const VERSION = "0.6.2";
   if (globalThis.CanvasMaterialsClient?.version === VERSION) return;
   const origin = location.origin;
   const ID = /^[1-9]\d*$/;
@@ -89,7 +89,7 @@
     if (id(info.id) !== course) throw fail("INVALID_RESPONSE", "Canvas 返回了其他课程的数据。");
     const normalized = modules.filter(m => m.published !== false && m.workflow_state !== "deleted").map(m => ({id: id(m.id), name: clean(m.name) || "未命名章节", position: Number(m.position) || 0,
       locked: m.state === "locked", message: m.state === "locked" ? "本章节尚未解锁。" : ""})).sort((a,b) => a.position - b.position);
-    contexts.set(course, {modules: new Set(normalized.map(m => m.id)), files: new Set(), pages: new Set()});
+    contexts.set(course, {modules: new Set(normalized.map(m => m.id)), pages: new Set()});
     return {ok: true, origin, course: {id: course, name: clean(info.name), code: clean(info.course_code), url: `${origin}/courses/${course}/modules`}, modules: normalized};
   }
   async function moduleItems(courseId, moduleId) {
@@ -102,14 +102,14 @@
       const title = clean(item.title) || "未命名资料", source = `${origin}/courses/${course}/modules/items/${id(item.id)}`;
       const locked = item.content_details?.locked_for_user === true;
       if (item.type === "File") {
-        const fileId = id(item.content_id); if (!locked) ctx.files.add(fileId);
+        const fileId = id(item.content_id);
         result.push({kind: "file", id: fileId, title, source, locked, message: locked ? clean(item.content_details?.lock_explanation) || "资料尚未解锁。" : ""});
       } else if (item.type === "Page" && typeof item.page_url === "string" && item.page_url) {
         if (!locked) ctx.pages.add(item.page_url);
         result.push({kind: "page", page: item.page_url, title, source: `${origin}/courses/${course}/pages/${encodeURIComponent(item.page_url)}`, locked, message: locked ? "内容页面尚未解锁。" : ""});
       } else if (["ExternalUrl", "ExternalTool"].includes(item.type) && !locked) {
         const value = item.external_url || item.html_url, fileId = fileRef(value, course);
-        if (fileId) {ctx.files.add(fileId); result.push({kind:"file",id:fileId,title,source,locked:false});}
+        if (fileId) result.push({kind:"file",id:fileId,title,source,locked:false});
         else {const url = external(value); if (url) result.push({kind: "external", title, url, source});}
       }
     }
@@ -128,14 +128,14 @@
       const value = element.getAttribute(element.tagName === "IFRAME" ? "src" : "href");
       const title = clean(element.textContent || element.getAttribute("title")) || "页面链接";
       const fileId = fileRef(value, course) || fileRef(element.getAttribute("data-api-endpoint"), course);
-      if (fileId) {ctx.files.add(fileId); refs.push({kind: "file", id: fileId, title});}
+      if (fileId) refs.push({kind: "file", id: fileId, title});
       else {const url = external(value); if (url) refs.push({kind: "external", url, title});}
     }
     return {ok: true, refs};
   }
   async function file(courseId, fileId) {
-    const {course, ctx} = context(courseId), file = id(fileId);
-    if (!ctx.files.has(file)) throw fail("BAD_TARGET", "文件未出现在当前章节资料中。");
+    // Canvas authorizes this course-scoped request, including after a document navigation.
+    const course = id(courseId), file = id(fileId);
     const data = await request(`/api/v1/courses/${course}/files/${file}`);
     if (id(data.id) !== file) throw fail("INVALID_RESPONSE", "Canvas 返回的文件编号不匹配。");
     let url = null;

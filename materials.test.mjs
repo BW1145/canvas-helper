@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import vm from "node:vm";
 import {readFileSync} from "node:fs";
-import {fileKind,selectRows,matching,readChapter,archiveRows,MaterialsArchive,externalHtml,checklist} from "./materials-model.js";
+import {fileKind,selectRows,matching,readChapter,archiveRows,archiveLinks,MaterialsArchive,externalHtml,checklist} from "./materials-model.js";
 import {fetchMaterialStream,downloadOrigins} from "./materials-transfer.js";
 const bytes = value => new TextEncoder().encode(value);
 const origin = "https://canvas.example.invalid";
@@ -28,23 +28,24 @@ test("materials API follows module/item pagination and preserves string IDs",asy
   const items = await h.client.moduleItems("12",catalog.modules[0].id); assert.equal(items.items.length,2); assert.equal(items.items[1].id,"11");
   assert.equal(h.calls.length,5);
 });
-test("materials API rejects foreign pagination and unlisted file/module targets",async () => {
+test("materials API rejects foreign pagination, invalid file IDs and unlisted modules",async () => {
   const h = clientHarness(url => url.pathname.endsWith("/modules") ? {data:[],headers:{link:'<https://outside.invalid/secret>; rel="next"'}} : catalogRoute(url));
   assert.equal((await h.client.catalog("12")).code,"BAD_PAGINATION");
   const clean = clientHarness(catalogRoute); await clean.client.catalog("12"); const count = clean.calls.length;
-  assert.equal((await clean.client.file("12","999")).code,"BAD_TARGET");
+  assert.equal((await clean.client.file("12","../999")).code,"INVALID_ID");
   assert.equal((await clean.client.moduleItems("12","999")).code,"BAD_TARGET");
   assert.equal(clean.calls.length,count);
   assert.equal((await clean.client.catalog(9007199254740992)).code,"INVALID_ID");
 });
-test("materials API registers only visible file references and preserves per-user lock state",async () => {
+test("materials API preserves visible references and current per-user file lock state",async () => {
   const h = clientHarness(url => {
     if (url.pathname.endsWith("/items")) return {data:[{id:"3",type:"File",content_id:"10",title:"A.pdf"},{id:"4",type:"File",content_id:"11",title:"Locked.pdf",content_details:{locked_for_user:true}},{id:"5",type:"ExternalUrl",title:"Video",external_url:"https://youtube.com/watch?v=abc&token=secret"},{id:"6",type:"ExternalUrl",title:"Attachment",external_url:`${origin}/courses/12/files/10/download`}]};
     if (url.pathname.endsWith("/files/10")) return {data:{id:"10",filename:"A.pdf",size:12,locked:true,locked_for_user:false,url:`${origin}/files/10/download`}};
+    if (url.pathname.endsWith("/files/11")) return {data:{id:"11",filename:"Locked.pdf",locked_for_user:true}};
     return catalogRoute(url);
   });
   await h.client.catalog("12"); const result = await h.client.moduleItems("12","1");
-  assert.equal(result.items[1].locked,true); assert.equal((await h.client.file("12","11")).code,"BAD_TARGET");
+  assert.equal(result.items[1].locked,true); assert.equal((await h.client.file("12","11")).locked,true);
   assert.equal((await h.client.file("12","10")).locked,false);
   assert.equal(result.items[2].url,"https://youtube.com/watch?v=abc");
   assert.equal(result.items[3].kind,"file"); assert.equal(result.items[3].id,"10");
@@ -53,6 +54,16 @@ test("materials authentication and rate responses remain explicit",async () => {
   for (const [status,code] of [[401,"AUTH_REQUIRED"],[403,"ACCESS_DENIED"],[429,"RATE_LIMIT"]]) {
     const h = clientHarness(() => ({data:{},status})); assert.equal((await h.client.catalog("12")).code,code);
   }
+});
+test("file metadata remains downloadable after the Canvas document context is replaced",async () => {
+  const h = clientHarness(url => {
+    assert.equal(url.pathname,"/api/v1/courses/12/files/10");
+    return {data:{id:"10",filename:"A.pdf",size:12,url:`${origin}/files/10/download`}};
+  });
+  const file=await h.client.file("12","10");
+  assert.equal(file.ok,true);assert.equal(file.name,"A.pdf");assert.equal(h.calls.length,1);
+  const denied=clientHarness(()=>({status:403,data:{}}));
+  assert.equal((await denied.client.file("12","10")).code,"ACCESS_DENIED");
 });
 test("chapter scans merge repeated files, preserve page sources and only list external URLs",async () => {
   const calls = [];
@@ -100,6 +111,12 @@ test("archive paths retain chapter order and safely disambiguate names",() => {
   const plan = archiveRows(chapters,new Set(["1:1","1:2","2:1"]));
   assert.equal(plan.length,3); assert.notEqual(plan[0].filename,plan[1].filename); assert.match(plan[1].filename,/\(2\)\.pdf$/);
   assert.ok(plan.every(r => !r.filename.split("/").includes(".."))); assert.match(plan[2].filename,/^02 /);
+});
+test("ZIP link attachments include only chapters represented by selected files",() => {
+  const first={moduleId:"1",url:"https://example.org/first"},second={moduleId:"2",url:"https://example.org/second"};
+  const chapters=[{id:"1",links:[first]},{id:"2",links:[second]}];
+  assert.deepEqual(archiveLinks(chapters,[row(2,"Notes.pdf",{moduleId:"2"})]),[second]);
+  assert.deepEqual(archiveLinks(chapters,[]),[]);
 });
 test("exports keep useful links while escaping HTML and excluding signed download URLs",() => {
   const html = externalHtml({name:'<script>alert(1)</script>'},[{title:'<img onerror="x">',url:"https://youtube.com/watch?v=abc&token=secret",source:"https://canvas.example.invalid/courses/12/pages/x",sourceTitle:"Page",moduleId:"1",chapter:"Week 1"}]);

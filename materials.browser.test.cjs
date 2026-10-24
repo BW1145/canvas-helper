@@ -5,17 +5,28 @@ const origin = "https://canvas.example.invalid", assets = "https://assets.exampl
 const payloads = {1:Buffer.from("%PDF-1.7\nOriginal PDF bytes\n%%EOF"),2:Buffer.from([80,75,3,4,0,0,0,0,1,2,3]),3:Buffer.from([80,75,3,4,0,0,0,0,4,5,6]),4:Buffer.from("%PDF-1.7\nAnother file\n%%EOF")};
 const names = {1:"Course outline.pdf",2:"Lecture 1.pptx",3:"Reading notes.docx",4:"Course outline.pdf",5:"Locked.pdf",6:"Retry.pdf"};
 const item = (id,type,extra={}) => ({id:String(id),type,title:names[id] || "Reading materials",position:id,...extra});
+function zipFiles(data) {
+  const view=new DataView(data.buffer,data.byteOffset,data.length),end=Number(view.getBigUint64(data.length-34,true));
+  const count=Number(view.getBigUint64(end+32,true)),files=new Map();let pos=Number(view.getBigUint64(end+48,true));
+  for(let i=0;i<count;i++) {
+    const n=view.getUint16(pos+28,true),ex=pos+46+n,name=data.subarray(pos+46,ex).toString("utf8");
+    const size=Number(view.getBigUint64(ex+4,true)),offset=Number(view.getBigUint64(ex+20,true));
+    const start=offset+30+view.getUint16(offset+26,true)+view.getUint16(offset+28,true);
+    files.set(name,data.subarray(start,start+size));pos+=46+n+view.getUint16(pos+30,true)+view.getUint16(pos+32,true);
+  }
+  return files;
+}
 (async()=>{
   const browser=await chromium.launch({headless:true,channel:process.env.CANVAS_HELPER_BROWSER_CHANNEL});
   const page=await browser.newPage({viewport:{width:1440,height:1000}}), requests=[],errors=[];
-  let metadataFailure=true,downloadFailure=true,pauseFile=false,releaseFile,pauseDownload=false,releaseDownload;
+  let metadataFailure=true,downloadFailure=true,pauseFile=false,releaseFile,pauseDownload=false,releaseDownload,metadataOffline=false;
   page.on("pageerror",e=>errors.push(e.message));
   await page.addInitScript(({source})=>{
     const file={name:"fixture-materials.zip",data:new Uint8Array()};
     window.fixture={file,pickers:0,permissions:[],exports:[]};
     let allowed=false;
     window.chrome={
-      scripting:{async executeScript(request){if(request.files){window.eval(source);return [];}return [{result:await request.func(...request.args)}];}},
+      scripting:{async executeScript(request){if(request.files){if(window.fixture.resetClient)delete window.CanvasMaterialsClient;window.eval(source);return [];}return [{result:await request.func(...request.args)}];}},
       permissions:{async contains(){return allowed;},async request(request){window.fixture.permissions.push(request);allowed=true;return true;}},
       downloads:{async download(request){window.fixture.exports.push(request);return 1;}}
     };
@@ -42,10 +53,10 @@ const item = (id,type,extra={}) => ({id:String(id),type,title:names[id] || "Read
     if(url.pathname==="/api/v1/courses/12")return route.fulfill({json:{id:"12",name:"Composition Studio · 作曲工作室",course_code:"MUS 111"}});
     if(url.pathname==="/api/v1/courses/12/modules")return route.fulfill({json:url.searchParams.has("page")?[{id:"2",name:"Week 2 · Composition",position:2},{id:"3",name:"Week 3 · Development",position:3,state:"locked"}]:[{id:"1",name:"Week 1 · Introduction",position:1}],headers:url.searchParams.has("page")?{}:{link:'</api/v1/courses/12/modules?per_page=100&page=2>; rel="next"'}});
     if(url.pathname==="/api/v1/courses/12/modules/1/items")return route.fulfill({json:[item(1,"File",{content_id:"1"}),item(2,"File",{content_id:"2"}),item(8,"Page",{page_url:"readings"}),item(9,"ExternalUrl",{title:"YouTube lecture",external_url:"https://www.youtube.com/watch?v=demo&token=fixture-secret"})]});
-    if(url.pathname==="/api/v1/courses/12/modules/2/items")return route.fulfill({json:[item(1,"File",{content_id:"1"}),item(4,"File",{content_id:"4"}),item(5,"File",{content_id:"5",content_details:{locked_for_user:true}}),item(6,"File",{content_id:"6"})]});
+    if(url.pathname==="/api/v1/courses/12/modules/2/items")return route.fulfill({json:[item(1,"File",{content_id:"1"}),item(4,"File",{content_id:"4"}),item(5,"File",{content_id:"5",content_details:{locked_for_user:true}}),item(6,"File",{content_id:"6"}),item(10,"ExternalUrl",{title:"Chapter 2 reading",external_url:"https://reading.example.invalid/chapter-2"})]});
     if(url.pathname==="/api/v1/courses/12/pages/readings")return route.fulfill({json:{published:true,body:'<p><a href="/courses/12/files/1/download?verifier=private">Outline again</a><a href="/courses/12/files/3?wrap=1">Reading notes</a><a href="https://example.org/reading?auth=fixture-secret">Related reading</a></p><iframe src="https://www.youtube.com/embed/demo" title="Embedded video"></iframe><div hidden><a href="https://hidden.invalid">Hidden</a></div><script>window.open("https://unrelated.invalid")</script>'}});
     const meta=url.pathname.match(/^\/api\/v1\/courses\/12\/files\/(\d+)$/);
-    if(meta){const id=meta[1];if(id==="2"&&pauseFile)await new Promise(resolve=>{releaseFile=resolve;});if(id==="6"&&metadataFailure)return route.fulfill({status:503,body:"offline"});return route.fulfill({json:{id,filename:names[id],size:(payloads[id]||payloads[1]).length,url:`${assets}/blob/${id}?signature=fixture-secret`,"content-type":"application/octet-stream"}});}
+    if(meta){const id=meta[1];if(id==="2"&&pauseFile)await new Promise(resolve=>{releaseFile=resolve;});if(metadataOffline||id==="6"&&metadataFailure)return route.fulfill({status:503,body:"offline"});return route.fulfill({json:{id,filename:names[id],size:(payloads[id]||payloads[1]).length,url:`${assets}/blob/${id}?signature=fixture-secret`,"content-type":"application/octet-stream"}});}
     const name=path.basename(url.pathname);
     if(!/^[\w.-]+\.(?:js|css|html)$/.test(name)||!fs.existsSync(path.join(__dirname,name)))return route.abort();
     return route.fulfill({contentType:name.endsWith("js")?"text/javascript":name.endsWith("css")?"text/css":"text/html",body:fs.readFileSync(path.join(__dirname,name))});
@@ -55,7 +66,7 @@ const item = (id,type,extra={}) => ({id:String(id),type,title:names[id] || "Read
     await page.goto(`${origin}/materials.html?sourceTab=42&course=12`);
     await page.waitForFunction(()=>document.getElementById("status").textContent.startsWith("已整理"));
     assert.equal(await page.locator(".chapter").count(),3);assert.equal(await page.locator(".file-row").count(),7);
-    assert.equal(await page.locator("#linkCount").textContent(),"3 条");
+    assert.equal(await page.locator("#linkCount").textContent(),"4 条");
     assert.equal(await page.locator('[data-focus="file-1:1"]').count(),1);
     assert.match(await page.locator(".file-row").first().textContent(),/Reading materials/);
     metadataFailure=false;await page.getByRole("button",{name:"重试读取",exact:true}).click();
@@ -76,7 +87,7 @@ const item = (id,type,extra={}) => ({id:String(id),type,title:names[id] || "Read
       assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,`${width}: overflow`);
     }
     await page.setViewportSize({width:390,height:844});await screenshot("canvas-helper-materials-mobile.png");
-    await page.locator("#linksToggle").click();assert.equal(await page.locator(".external-item").count(),3);
+    await page.locator("#linksToggle").click();assert.equal(await page.locator(".external-item").count(),4);
     assert.doesNotMatch(await page.locator("#externalList").textContent(),/fixture-secret|Hidden/);
     assert.equal(requests.some(u=>/youtube|example\.org|hidden\.invalid|unrelated\.invalid/.test(u)),false);
     await page.locator("#exportLinksBtn").click();assert.equal(await page.evaluate(()=>fixture.exports.length),1);
@@ -128,7 +139,30 @@ const item = (id,type,extra={}) => ({id:String(id),type,title:names[id] || "Read
     assert.equal(Number(earlyView.getBigUint64(earlyEnd+32,true)),3,"one chosen file + CSV + current links snapshot");
     assert.match(early.toString("utf8"),/当时的资料扫描尚未完成/);
     assert.doesNotMatch(early.toString("utf8"),/youtube\.com/);
+
+    // Reset injected state before every metadata request, as happens on source-tab navigation.
+    await page.locator("#clearBtn").click();await page.locator("#typeFilter").selectOption("PDF");await page.locator("#selectAll").check();
+    assert.equal(await page.locator("#selectedBtn").textContent(),"已选 4 个文件");
+    await page.evaluate(()=>{fixture.resetClient=true;});metadataOffline=true;
+    await page.locator("#downloadBtn").click();
+    await page.waitForFunction(()=>document.getElementById("downloadNotice").textContent.startsWith("本次下载成功 0 / 4"));
+    assert.match(await page.locator("#downloadNotice").textContent(),/HTTP 503/);
+    metadataOffline=false;await page.locator("#retryBtn").click();
+    await page.waitForFunction(()=>document.getElementById("downloadNotice").textContent.startsWith("已保存 4 / 4"));
+    const recovered=zipFiles(Buffer.from(await page.evaluate(()=>Array.from(fixture.file.data))));
+    assert.equal([...recovered.keys()].filter(name=>name.endsWith(".pdf")).length,4);
+    for(const [name,data] of recovered)if(name.endsWith(".pdf"))assert.deepEqual(data,name.endsWith("(2).pdf")?payloads[4]:payloads[1]);
+    assert.doesNotMatch(recovered.get("资料清单.csv").toString("utf8"),/失败|未完成|页面已刷新/);
+
+    // A chapter-only selection must not attach links from another chapter.
+    await page.locator("#clearBtn").click();await page.locator('[data-focus="chapter-2"]').check();
+    await page.locator("#downloadBtn").click();
+    await page.waitForFunction(()=>document.getElementById("downloadNotice").textContent.startsWith("已保存 3 / 3"));
+    const scoped=zipFiles(Buffer.from(await page.evaluate(()=>Array.from(fixture.file.data))));
+    assert.equal(scoped.size,5);assert.ok([...scoped.keys()].filter(name=>name.endsWith(".pdf")).every(name=>name.startsWith("02 ")));
+    assert.match(scoped.get("外部链接.html").toString("utf8"),/reading\.example\.invalid\/chapter-2/);
+    assert.doesNotMatch(scoped.get("外部链接.html").toString("utf8"),/youtube\.com|example\.org/);
     assert.deepEqual(errors,[]);
-    console.log("materials browser: incremental chapter files, download during scanning, fixed selection snapshots, pagination, retries, permission flow, link export and 7 viewport widths passed");
+    console.log("materials browser: fresh Canvas document download, four PDF bytes, chapter-scoped links, zero-success notice, incremental scan/download, retries and 7 viewport widths passed");
   }finally{await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});

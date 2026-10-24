@@ -84,6 +84,10 @@ export function archiveRows(chapters, selected) {
   });
   return result;
 }
+export function archiveLinks(chapters, rows) {
+  const modules = new Set(rows.map(row => row.moduleId));
+  return chapters.filter(chapter => modules.has(chapter.id)).flatMap(chapter => chapter.links || []);
+}
 export function publicLink(value) {
   try {
     const url = new URL(value);
